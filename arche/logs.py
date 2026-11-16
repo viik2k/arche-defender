@@ -16,7 +16,8 @@ SERVICE = {'kde': 'screen unlock', 'kscreenlocker': 'screen unlock', 'polkit-1':
 ADMIN = {'wheel': 'can run anything as root with sudo', 'sudo': 'can run anything as root with sudo',
          'admin': 'can run anything as root with sudo', 'root': 'root group',
          'docker': 'root-equivalent: docker can mount / without a password', 'libvirt': 'root-equivalent through VMs',
-         'lxd': 'root-equivalent through containers', 'disk': 'can read every disk directly', 'adm': 'can read all system logs'}
+         'lxd': 'root-equivalent through containers', 'disk': 'can read every disk directly', 'adm': 'can read all system logs',
+         'input': 'every program it runs can read keystrokes', 'uinput': 'every program it runs can type as you'}
 
 TAMPER = [(re.compile(p), what) for p, what in (
     (r'\bsetenforce\s+(0|[Pp]ermissive)\b', 'put SELinux in permissive mode'),

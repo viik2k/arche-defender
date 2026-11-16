@@ -1,6 +1,6 @@
 # Privacy and devices: what can see or hear you right now, what sandboxed apps are allowed to touch,
 # and the hardware that is plugged in or paired (a new "keyboard" can be a BadUSB).
-import configparser, json, os, re
+import configparser, grp, json, os, re
 from .core import check, alert, warn, item, sh, have, text, files, HOME
 from .ai import secret_kinds
 from .malware import walk
@@ -24,16 +24,53 @@ def pipewire_streams():
 
 @check('Camera, microphone and screen', 'Privacy')
 def watching():
-    """Apps that have the camera, a microphone or a screen capture open at the moment of the scan."""
+    """Apps that have the camera, a microphone, a screen capture or the keyboard open at the moment of the scan."""
     for fd in files('/proc/[0-9]*/fd/*'):
         try:
             if re.match(r'/dev/video\d+$', os.readlink(fd)): yield item(f'Camera open by {comm(fd.split("/")[2])}')
         except OSError: pass   # ponytail: other users' processes need root
+    opened = []
+    for fd in files('/proc/[0-9]*/fd/*'):
+        try: dev = os.readlink(fd)
+        except OSError: continue
+        if re.match(r'/dev/input/event\d+$|/dev/uinput$', dev): opened.append((comm(fd.split('/')[2]), dev))
+    try: in_group = grp.getgrnam('input').gr_gid in os.getgroups()
+    except KeyError: in_group = False
+    yield from input_rows(opened, keyboards(text('/proc/bus/input/devices')), in_group)
     for mc, app, node in pipewire_streams():
         if mc.endswith('/Internal'): continue
         if mc.startswith('Stream/Input/Audio'): yield item(f'Microphone open by {app}')
         elif mc.startswith('Stream/Input/Video'): yield item(f'Camera or screen capture open by {app}')
         elif 'portal' in node.lower() or 'screen' in node.lower(): yield item(f'Screen is being shared ({app})')
+
+
+# Desktop sessions get keyboards through logind; the rest are remappers, macro and game-streaming tools users install.
+COMPOSITORS = {'kwin_wayland', 'Xorg', 'Xwayland', 'gnome-shell', 'mutter', 'sway', 'Hyprland', 'weston', 'labwc', 'niri', 'cosmic-comp',
+               'river', 'wayfire', 'gamescope', 'systemd-logind'}
+INPUT_TOOLS = {'steam', 'steamwebhelper', 'input-remapper', 'input-remapper-s', 'keyd', 'kanata', 'kmonad', 'xremap', 'espanso', 'sunshine',
+               'solaar', 'antimicrox', 'ydotoold', 'evsieve', 'warpd', 'showmethekey-cli', 'evtest', 'libinput', 'openrgb', 'rustdesk'}
+
+
+def keyboards(devices):
+    """{'eventN': name} for real keyboards in /proc/bus/input/devices (key repeat on: not power buttons or speakers)."""
+    out = {}
+    for b in devices.split('\n\n'):
+        name, h, ev = re.search(r'^N: Name="(.*)"', b, re.M), re.search(r'^H: Handlers=(.*)$', b, re.M), re.search(r'^B: EV=(\w+)', b, re.M)
+        if name and h and ev and 'kbd' in h[1].split() and int(ev[1], 16) & 0x100000:
+            out |= {e: name[1] for e in h[1].split() if e.startswith('event')}
+    return out
+
+
+def input_rows(opened, kbds, in_group):
+    """opened: (process, device path). A program that holds a keyboard sees every key typed in every app;
+    one that holds /dev/uinput can type and click as you."""
+    if in_group: yield warn('Your account is in the input group: every program you run can read your keystrokes',
+                            fix='Unless a remapper needs it: sudo gpasswd -d $USER input (then log out and back in)')
+    for proc, dev in sorted(set(opened)):
+        if proc in COMPOSITORS: continue
+        what = f'reads your keyboard ({kbds[dev[11:]]})' if dev[11:] in kbds else 'can type and click as you (/dev/uinput)' if dev == '/dev/uinput' else None
+        if what: yield (item if proc in INPUT_TOOLS else warn)(f'{proc} {what}',
+                                                                fix=f'If you do not know it, find it with: pgrep -a {proc}, then quarantine its program file. Keyloggers work this way.')
 
 
 RISKY_TALK = {'org.freedesktop.Flatpak': 'can run commands outside its sandbox',

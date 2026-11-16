@@ -68,6 +68,34 @@ class Usb(unittest.TestCase):
         self.assertEqual(r[1][0], 'USB Acme Stick [05ac:0001] (keyboard)')
 
 
+DEVICES = """I: Bus=0019 Vendor=0000 Product=0001 Version=0000
+N: Name="Power Button"
+H: Handlers=kbd event0
+B: EV=3
+
+I: Bus=0003 Vendor=046d Product=c339 Version=0111
+N: Name="Logitech Pro Gaming Keyboard"
+H: Handlers=sysrq kbd leds event7
+B: EV=120013
+
+N: Name="Turtle Beach Recon Controller"
+H: Handlers=event9 js0
+B: EV=1b
+"""
+
+
+class Input(unittest.TestCase):
+    def test_keyboard_readers(self):
+        kb = privacy.keyboards(DEVICES)
+        self.assertEqual(kb, {'event7': 'Logitech Pro Gaming Keyboard'})
+        opened = [('kwin_wayland', '/dev/input/event7'), ('steam', '/dev/input/event9'), ('steam', '/dev/uinput'),
+                  ('espanso', '/dev/input/event7'), ('updater', '/dev/input/event7'), ('updater', '/dev/input/event0')]
+        rows = [(s, t) for t, s, _ in privacy.input_rows(opened, kb, False)]
+        self.assertEqual(rows, [(INFO, 'espanso reads your keyboard (Logitech Pro Gaming Keyboard)'), (INFO, 'steam can type and click as you (/dev/uinput)'),
+                                (WARN, 'updater reads your keyboard (Logitech Pro Gaming Keyboard)')])
+        self.assertEqual([s for _, s, _ in privacy.input_rows([], kb, True)], [WARN])
+
+
 if __name__ == '__main__':
     unittest.main()
 
