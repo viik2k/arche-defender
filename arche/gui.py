@@ -153,12 +153,24 @@ def gui():
         report.write(p, results, load_baseline())
         status.config(text=f'Report saved: {p}')
 
+    def result(name, msg):
+        """Short results in a message box; a vet or scan report in a window you can scroll and copy from."""
+        if msg.count('\n') < 15: return messagebox.showinfo(name, msg)
+        w = tk.Toplevel(root, bg=BG); w.title(f'Arche Defender: {name}'); w.geometry('900x600')
+        from tkinter.scrolledtext import ScrolledText
+        t = ScrolledText(w, bg=PANEL, fg=FG, bd=0, highlightthickness=0, wrap='word', font=('monospace', 10), padx=10, pady=10)
+        t.insert('1.0', msg); t.config(state='disabled'); t.pack(fill='both', expand=True)
+
     def run_action(name):
         fn, helptext, argname = ACTIONS[name]
         arg = None
         if argname:
-            arg = (filedialog.askopenfilename(title=helptext) if 'path' in argname.lower() else
-                   simpledialog.askstring(name, helptext, show='*' if argname == 'password' else None))
+            if 'path' not in argname.lower(): arg = simpledialog.askstring(name, helptext, show='*' if argname == 'password' else None)
+            elif 'folder' not in helptext: arg = filedialog.askopenfilename(title=helptext)
+            else:   # scan and vet take a folder (an unpacked skill or plugin) or a single file
+                d = messagebox.askyesnocancel(name, f'{helptext}\n\nYes: pick a folder.  No: pick a file.')
+                if d is None: return
+                arg = filedialog.askdirectory(title=helptext, mustexist=True) if d else filedialog.askopenfilename(title=helptext)
             if not arg: return
         status.config(text=f'Running {name} ...')
 
@@ -166,8 +178,7 @@ def gui():
             try: msg = fn(arg) if argname else fn()
             except Exception as e: msg = f'{name} failed: {e}'
             mon.clear()
-            root.after(0, lambda: (status.config(text=str(msg).splitlines()[0] if msg else name + ' done'),
-                                   messagebox.showinfo(name, str(msg))))
+            root.after(0, lambda: (status.config(text=str(msg).splitlines()[0] if msg else name + ' done'), result(name, str(msg))))
         threading.Thread(target=go, daemon=True).start()
 
     for n, (_, h, _) in ACTIONS.items(): menu.add_command(label=f'{n}: {h}', command=lambda n=n: run_action(n))
