@@ -45,6 +45,10 @@ AI_RULES = [(n, s, re.compile(p, re.I), h) for n, s, p, h in (
      r'\b(extract|unzip|unpack|unrar|open)\b[^\n]{0,60}\b(with|using)\s+(the\s+)?password\b|\b(archive|zip|rar|7z)\s+password\s*[:=]',
      ('password',)),
     ('strips the macOS quarantine flag so Gatekeeper never checks the program', WARN, r'\bxattr\s+(-\w+\s+)*-[dc]\w*\s+(com\.apple\.quarantine)?', ('xattr',)),
+    # A "rug pull" that needs no update: the skill reads its real instructions from a page its author can change at any time.
+    ('loads its instructions from the web at run time (they can change after you checked it)', WARN,
+     Q + r'\b(fetch|retrieve|load|read|curl|wget|webfetch)\b[^\n]{0,60}https?://[^\s)\]>"\']+[^\n]{0,80}\b((follow|obey|execute|carry out)\s+'
+         r'(all\s+|any\s+)?(the\s+|its\s+|their\s+|those\s+|these\s+)?(instructions?|steps|commands)|do what (it|they) says?)\b', ('http',)),
     ('downloads a program, makes it executable and runs it', WARN,
      r'\b(curl|wget)\b[^\n]{0,200}?(-\w*[oO]\b|--output|>)\s*\S+[^\n]{0,120}\bchmod\s+(\+x|[0-7]*[157][0-7]{0,2})\b', ('chmod',)),
 )]
