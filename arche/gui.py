@@ -3,7 +3,7 @@
 import queue, threading
 from concurrent.futures import ThreadPoolExecutor
 from . import core
-from .core import CHECKS, ACTIONS, INFO, WARN, ALERT, run_check, load_baseline, save_baseline
+from .core import CHECKS, ACTIONS, INFO, WARN, ALERT, run_check, load_baseline, save_baseline, load_ignored, set_ignored
 from .cli import pick
 
 BG, PANEL, FG, MUTED, LINE = '#14161a', '#1b1e23', '#e8eaed', '#9aa0a6', '#2a2e35'
@@ -47,7 +47,7 @@ def gui():
     for tag, c in (('alert', RED), ('warn', ORANGE), ('new', AMBER), ('fix', MUTED), ('head', FG)): det.tag_configure(tag, foreground=c)
     det.tag_configure('head', font=('TkDefaultFont', 11, 'bold'), spacing1=8, spacing3=4)
 
-    results, q, busy = {}, queue.Queue(), []
+    results, q, busy, refs = {}, queue.Queue(), [], {}   # refs: text tag -> (check, row text, is ignored) for right-click
     tree.insert('', 'end', 'overview', text='  Overview', tags=('family',))
     for n, c in CHECKS.items():
         if not tree.exists('f:' + c.family): tree.insert('', 'end', 'f:' + c.family, text='  ' + c.family, open=True, tags=('family',))
@@ -56,20 +56,25 @@ def gui():
     def rows_line(r):
         return MARK.get(r.sev, '[+] ' if r.new else '    ') + r.text + '\n', 'alert' if r.sev == ALERT else 'warn' if r.sev else 'new' if r.new else ''
 
-    def write_rows(rows, only_flagged=False):
+    def ref(n, t, ignored=False):
+        refs[f'r{len(refs)}'] = (n, t, ignored)
+        return f'r{len(refs) - 1}'
+
+    def write_rows(n, rows):
         for r in rows:
-            if only_flagged and not (r.sev or r.new): continue
-            det.insert('end', *rows_line(r))
+            line, tag = rows_line(r)
+            det.insert('end', line, (tag, ref(n, r.text)) if tag else ref(n, r.text))
             if r.fix and (r.sev or r.new): det.insert('end', f'      fix: {r.fix}\n', 'fix')
 
     def show(_=None):
         sel = (tree.selection() or ('overview',))[0]
-        det.config(state='normal'); det.delete('1.0', 'end')
+        det.config(state='normal'); det.delete('1.0', 'end'); refs.clear()
         if sel.startswith('c:'):
             n = sel[2:]
             if n not in results: det.insert('end', 'Not scanned yet.' + ('  This check runs in a full scan.' if CHECKS[n].slow else ''))
             elif not results[n]: det.insert('end', 'Nothing to report.')
-            else: write_rows(results[n])
+            else: write_rows(n, results[n])
+            for t in sorted(load_ignored().get(n, ())): det.insert('end', f'    ignored: {t}\n', ('fix', ref(n, t, True)))
         else:
             fam = None if sel == 'overview' else sel[2:]
             names = [n for n, c in CHECKS.items() if n in results and fam in (None, c.family)]
@@ -77,7 +82,7 @@ def gui():
             if not names: det.insert('end', 'Run a scan to see findings.')
             elif not any(h for _, h in hits): det.insert('end', 'Nothing flagged. ' + ('Everything matches your baseline.' if load_baseline() else ''))
             for n, h in sorted(hits, key=lambda x: -max([r.sev for r in x[1]] or [0])):
-                if h: det.insert('end', n + '\n', 'head'); write_rows(h)
+                if h: det.insert('end', n + '\n', 'head'); write_rows(n, h)
         det.config(state='disabled')
 
     def paint(n):
@@ -105,10 +110,10 @@ def gui():
                 if tree.selection() and tree.selection()[0] in ('c:' + m[0], 'overview'): show()
         except queue.Empty: root.after(100, drain)
 
-    def start(full_scan):
+    def start(full_scan, names=None):
         if busy: return
         busy.append(1); quick.config(state='disabled'); full.config(state='disabled')
-        names = pick(full_scan)
+        names = names or pick(full_scan)
         for n in names: results.pop(n, None); tree.item('c:' + n, text=n + '  ...', tags=('idle',))
         status.config(text='Scanning ...')
         threading.Thread(target=worker, args=(names, load_baseline()), daemon=True).start()
@@ -154,6 +159,18 @@ def gui():
     for n, (_, h, _) in ACTIONS.items(): menu.add_command(label=f'{n}: {h}', command=lambda n=n: run_action(n))
     if not ACTIONS: menu.add_command(label='No tools installed', state='disabled')
 
+    def context(e):
+        hit = next((refs[t] for t in det.tag_names(f'@{e.x},{e.y}') if t in refs), None)
+        if not hit: return
+        n, t, ignored = hit
+        m = tk.Menu(det, tearoff=0, bg=PANEL, fg=FG)
+        if ignored: m.add_command(label='Show this finding again', command=lambda: (set_ignored(n, t, False), start(False, [n])))
+        else: m.add_command(label='Ignore this finding', command=lambda: (set_ignored(n, t), results.__setitem__(
+            n, [r for r in results[n] if r.text != t]), paint(n), headline(), show()))
+        m.add_command(label='Copy', command=lambda: (root.clipboard_clear(), root.clipboard_append(f'{n}: {t}')))
+        m.tk_popup(e.x_root, e.y_root)
+
+    det.bind('<Button-3>', context)
     tree.bind('<<TreeviewSelect>>', show)
     quick.config(command=lambda: start(False)); full.config(command=lambda: start(True))
     save.config(command=do_save); report.config(command=do_report)

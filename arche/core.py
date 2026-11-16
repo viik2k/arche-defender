@@ -7,6 +7,7 @@ from pathlib import Path
 HOME = str(Path.home())
 STATE = Path(os.environ.get('XDG_STATE_HOME') or f'{HOME}/.local/state') / 'arche-defender'
 BASE_FILE = STATE / 'baseline.json'
+IGNORE_FILE = STATE / 'ignored.json'   # {check: [row text]} the user chose to hide, at any severity
 
 # Severity: INFO rows are inventory (flagged only when new vs the baseline); WARN is weak config; ALERT is likely bad.
 # A check yields (text, severity, fix) via these helpers; fix is an optional one-line "what to do about it".
@@ -97,8 +98,39 @@ def run_check(name, base):
         if not t: continue
         old = merged.get(t, (INFO, None))
         merged[t] = (max(old[0], int(s)), old[1] or (f[0] if f else None))
-    known = set((base or {}).get(name, []))
-    return [Row(t, s, base is not None and name in base and s == INFO and t not in known, f) for t, (s, f) in sorted(merged.items())]
+    known, skip = set((base or {}).get(name, [])), load_ignored().get(name, set())
+    return [Row(t, s, base is not None and name in base and s == INFO and t not in known, f)
+            for t, (s, f) in sorted(merged.items()) if t not in skip]
+
+
+def load_ignored(): return {k: set(v) for k, v in (jsonf(IGNORE_FILE) if IGNORE_FILE.exists() else {}).items()}
+
+
+def set_ignored(name, text, on=True):
+    """Hide (or show again) one finding, keyed on check and exact text: ignoring one docker-group line hides no other line."""
+    ig = load_ignored()
+    (ig.setdefault(name, set()).add if on else ig.setdefault(name, set()).discard)(text)
+    write_private(IGNORE_FILE, json.dumps({k: sorted(v) for k, v in ig.items() if v}, indent=1))
+
+
+def _finding(arg):
+    name, _, t = (arg or '').partition(': ')
+    if name not in CHECKS or not t: raise ValueError(f'Give it as "Check name: finding text"; no check called {name!r}')
+    return name, t
+
+
+@action('ignore', 'hide one finding from now on, as "Check name: finding text" (or right-click it in the window)', arg='finding')
+def _ignore(arg): set_ignored(*_finding(arg)); return f'Ignoring {arg}'
+
+
+@action('unignore', 'show an ignored finding again, as "Check name: finding text"', arg='finding')
+def _unignore(arg): set_ignored(*_finding(arg), on=False); return f'Showing again: {arg}'
+
+
+@action('ignored', 'list the findings you chose to ignore')
+def _ignored():
+    ig = load_ignored()
+    return '\n'.join(f'{n}: {t}' for n in sorted(ig) for t in sorted(ig[n])) or 'Nothing is ignored.'
 
 
 def score(results):

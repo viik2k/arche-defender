@@ -38,6 +38,8 @@ when installed.
 
 Every finding is an **alert** (red, -15 points), a **warning** (orange, -4) or an inventory item that is tracked
 against the baseline (-1 when new). Most come with a `fix:` line.
+A finding you have judged harmless can be ignored (right-click it): that exact line stops counting, and nothing
+else in the same check is hidden with it.
 
 | Family | What it looks at |
 |---|---|
@@ -76,6 +78,7 @@ Also in the window's **Tools** menu.
 | `intel-update` | downloads the threat-intel feeds; the only network access the tool makes |
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
+| `ignore "Check: text"` / `unignore "Check: text"` / `ignored` | hide one finding for good (in the window: right-click it), show it again, list them |
 
 ### Threat-intel feeds
 

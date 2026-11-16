@@ -1,5 +1,6 @@
 # Command line: the GUI by default, headless scans for scripts and timers, and the registered actions.
-import argparse, json, sys
+import argparse, json, sys, tempfile
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from . import core, __version__
 from .core import CHECKS, ACTIONS, INFO, WARN, ALERT, run_check, load_baseline, load_all
@@ -36,6 +37,10 @@ def selftest():
     if [x.text for x in r if x.new] != ['fresh'] or [x.text for x in r if x.sev == ALERT] != ['bad'] or \
        [(x.text, x.fix) for x in r if x.sev == WARN] != [('meh', 'do x')]: print('FAIL baseline diff'); fail += 1
     if any(x.new for x in run_check('_t', {})): print('FAIL check missing from baseline counted as new'); fail += 1
+    real, core.IGNORE_FILE = core.IGNORE_FILE, Path(tempfile.mkdtemp()) / 'ignored.json'
+    core.set_ignored('_t', 'meh')
+    if [x.text for x in run_check('_t', None)] != ['bad', 'fresh', 'known']: print('FAIL ignore list'); fail += 1
+    core.IGNORE_FILE = real
     del CHECKS['_t']
     for n, rows in scan_all(None, pick(full=True)).items():
         c = CHECKS[n]
@@ -80,7 +85,8 @@ def main(argv=None):
     if args.action:
         fn, _, argname = ACTIONS[args.action]
         if argname and not args.arg: p.error(f'{args.action} needs {argname.upper()}')
-        print(fn(args.arg) if argname else fn())
+        try: print(fn(args.arg) if argname else fn())
+        except ValueError as e: p.error(str(e))
         return 0
     if args.selftest: return selftest()
     if args.scan: return scan(args)
