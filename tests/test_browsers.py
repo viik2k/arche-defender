@@ -49,6 +49,25 @@ class Browsers(unittest.TestCase):
             r = [(t, s) for t, s, _ in browsers.protection()]
         self.assertEqual(r, [('Chrome: 2 saved passwords were found in a data breach', WARN), ('Chrome: 1 saved password was entered on a phishing site', ALERT)])
 
+    def test_site_permissions(self):
+        prof = self.d / 'Default'; prof.mkdir()
+        ex = {'notifications': {'https://[*.]news.example:443,*': {'setting': 1}, 'https://robot-check.example:443,*': {'setting': 1},
+                                'https://blocked.example:443,*': {'setting': 2}},
+              'media_stream_camera': {'https://meet.example:443,*': {'setting': 1}}, 'cookies': {'https://x.example:443,*': {'setting': 1}}}
+        (prof / 'Preferences').write_text(json.dumps({'profile': {'content_settings': {'exceptions': ex}}}))
+        ff = self.d / 'ab12.default-release'; ff.mkdir()
+        con = sqlite3.connect(ff / 'permissions.sqlite'); con.execute('CREATE TABLE moz_perms (origin, type, permission)')
+        con.executemany('INSERT INTO moz_perms VALUES (?, ?, ?)', [('https://maps.example^userContextId=2', 'geo', 1), ('https://ads.example', 'desktop-notification', 2)])
+        con.commit(); con.close()
+        hit = lambda h: 'HaGeZi TIF' if h == 'robot-check.example' else None
+        with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Brave', str(prof))]), mock.patch.object(browsers, 'FIREFOX', [str(self.d)]), \
+             mock.patch('arche.intel.domain_hit', hit):
+            r = [(t, s) for t, s, _ in browsers.site_permissions()]
+        self.assertEqual(r, [('Brave: robot-check.example may send you notifications and is on threat list HaGeZi TIF', ALERT),
+                             ('Brave: 2 sites may send you notifications: news.example, robot-check.example', INFO),
+                             ('Brave: 1 site may use your camera: meet.example', INFO),
+                             ('Firefox (default-release): 1 site may see your location: maps.example', INFO)])
+
     def test_firefox_prefs(self):
         prof = self.d / 'ab12.default-release'; prof.mkdir()
         (prof / 'prefs.js').write_text('user_pref("browser.safebrowsing.malware.enabled", false);\nuser_pref("network.proxy.type", 1);\n'

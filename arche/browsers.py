@@ -107,6 +107,45 @@ def no_primary_password(key4):
     except IndexError: return None
 
 
+# Site permissions worth a look: "click Allow to prove you are not a robot" pages use notifications to push fake virus alerts.
+SITE_PERMS = {'notifications': 'send you notifications', 'media_stream_camera': 'use your camera', 'media_stream_mic': 'use your microphone',
+              'geolocation': 'see your location'}
+FF_PERMS = {'desktop-notification': 'notifications', 'camera': 'media_stream_camera', 'microphone': 'media_stream_mic', 'geo': 'geolocation'}
+
+
+def site(pattern):
+    """'https://[*.]example.com:443,*' (Chromium) or 'https://example.com^userContextId=1' (Firefox) -> 'example.com'"""
+    return re.sub(r'^\w+://|:\d+$', '', re.split(r'[,^]', pattern)[0].replace('[*.]', ''))
+
+
+def site_rows(name, grants):
+    """grants: {permission: sites allowed}."""
+    from .intel import domain_hit   # ponytail: intel imports this module, so it is imported late
+    for perm, sites in grants.items():
+        sites = sorted(set(sites))
+        for h in sites:
+            if hit := domain_hit(h):
+                yield alert(f'{name}: {h} may {SITE_PERMS[perm]} and is on threat list {hit}',
+                            fix='Block it in the browser (Settings > Privacy and security > Site settings), and ignore any virus warning it showed.')
+        if sites: yield item(f'{name}: {len(sites)} site{"s" if len(sites) > 1 else ""} may {SITE_PERMS[perm]}: '
+                             f'{", ".join(sites[:8])}{" and more" if len(sites) > 8 else ""}',
+                             fix='Remove the ones you do not know: Settings > Privacy and security > Site settings (Firefox: Settings > Privacy & Security > Permissions).')
+
+
+@check('Site permissions', 'Browsers')
+def site_permissions():
+    """Sites allowed to send notifications or use the camera, microphone or location, and any of them on a threat list."""
+    for name, prof in chromium_profiles():
+        ex = (jsonf(f'{prof}/Preferences').get('profile') or {}).get('content_settings', {}).get('exceptions', {})
+        yield from site_rows(label(name, prof), {k: [site(o) for o, v in (ex.get(k) or {}).items() if isinstance(v, dict) and v.get('setting') == 1]
+                                                 for k in SITE_PERMS})
+    for prof in sorted({os.path.dirname(p) for r in FIREFOX for p in files(f'{r}/*/permissions.sqlite')}):
+        grants = {}
+        for origin, t in copy_query(f'{prof}/permissions.sqlite', 'SELECT origin, type FROM moz_perms WHERE permission = 1'):
+            if t in FF_PERMS: grants.setdefault(FF_PERMS[t], []).append(site(origin))
+        yield from site_rows(f'Firefox ({os.path.basename(prof).partition(".")[2] or os.path.basename(prof)})', grants)
+
+
 FF_WEAK = (('xpinstall.signatures.required', lambda v: v is False, 'installs extensions without Mozilla\'s signature check'),
            ('security.tls.version.min', lambda v: isinstance(v, int) and v < 3, 'allows outdated TLS 1.0/1.1 connections'),
            ('security.cert_pinning.enforcement_level', lambda v: v == 0, 'has certificate pinning off'),
