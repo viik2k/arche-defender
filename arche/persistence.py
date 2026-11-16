@@ -171,7 +171,16 @@ CHROMIUM = (('Chrome', 'google-chrome', 'com.google.Chrome'), ('Chromium', 'chro
             ('Vivaldi', 'vivaldi', 'com.vivaldi.Vivaldi'), ('Helium', 'net.imput.helium', 'net.imput.helium'))
 
 
-def chromium_roots(): return [(n, r) for n, sub, flat in CHROMIUM for r in (f'{HOME}/.config/{sub}', f'{HOME}/.var/app/{flat}/config/{sub}')]
+def chromium_roots():
+    """(browser, user-data-dir) for every Chromium-family browser, plus any other dir laid out like one (a second Brave
+    started with --user-data-dir=~/.config/brave-vault). Electron apps keep Preferences at their root, so they stay out."""
+    roots = [(n, r) for n, sub, flat in CHROMIUM for r in (f'{HOME}/.config/{sub}', f'{HOME}/.var/app/{flat}/config/{sub}')]
+    known = {os.path.realpath(r) for _, r in roots}
+    for ls in files('~/.config/*/Local State', '~/.var/app/*/config/*/Local State'):
+        d = os.path.dirname(ls)
+        if os.path.realpath(d) not in known and files(f'{d}/Default/Preferences', f'{d}/Profile */Preferences'):
+            known.add(os.path.realpath(d)); roots.append((os.path.basename(d), d))
+    return roots
 
 
 def chromium_extensions():

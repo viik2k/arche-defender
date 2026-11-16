@@ -1,7 +1,7 @@
 # Run: python3 tests/test_persistence.py (or pytest)
 import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.persistence import hooks
+from arche.persistence import hooks, chromium_roots
 
 
 def test_hooks():
@@ -17,5 +17,18 @@ def test_hooks():
     assert not any('alias.lg' in r or 'User me' in r for r in rows) and any('ProxyCommand nc' in r for r in rows), rows
 
 
+
+def test_custom_chromium_dirs():
+    home, old = tempfile.mkdtemp(), dict(os.environ); atexit.register(shutil.rmtree, home, True)
+    for d in ('.config/brave-vault/Default', '.config/Code', '.var/app/x.y/config/work/Profile 2'): os.makedirs(f'{home}/{d}')
+    for f in ('.config/brave-vault/Local State', '.config/brave-vault/Default/Preferences', '.config/Code/Local State',
+              '.config/Code/Preferences', '.var/app/x.y/config/work/Local State', '.var/app/x.y/config/work/Profile 2/Preferences'):
+        open(f'{home}/{f}', 'w').write('{}')
+    os.environ['HOME'] = home
+    try: extra = [(n, r.replace(home, '~')) for n, r in chromium_roots() if r.startswith(home)]
+    finally: os.environ.clear(); os.environ.update(old)
+    assert extra == [('brave-vault', '~/.config/brave-vault'), ('work', '~/.var/app/x.y/config/work')], extra   # not the Electron app
+
+
 if __name__ == '__main__':
-    test_hooks(); print('ok')
+    test_hooks(); test_custom_chromium_dirs(); print('ok')
