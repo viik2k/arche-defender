@@ -151,6 +151,9 @@ def test_claude_settings():
     assert not list(claude_settings({'env': {'ANTHROPIC_BASE_URL': 'http://localhost:4000'}}, 'x'))   # LiteLLM, claude-code-router
     assert not list(claude_settings({'env': {'ANTHROPIC_BASE_URL': 'https://api.anthropic.com', 'ANTHROPIC_BEDROCK_BASE_URL':
                                              'https://bedrock-runtime.us-east-1.amazonaws.com'}}, 'x'))
+    rows = list(claude_settings({'permissions': {'additionalDirectories': ['~/', '../docs', '/']}}, 'x'))
+    assert len(rows) == 1 and rows[0][0].startswith('Claude Code treats ~/, / as part'), rows
+    assert not list(claude_settings({'permissions': {'additionalDirectories': ['~/Desktop/Repos/x', '/tmp']}}, 'x'))
 
 
 def test_invisible_code():

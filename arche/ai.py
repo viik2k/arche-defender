@@ -399,6 +399,10 @@ def claude_settings(s, where):
     if p.get('defaultMode') == 'bypassPermissions':
         yield warn(f'Claude Code skips all permission prompts by default ({where})', 'Remove "defaultMode": "bypassPermissions"')
     if s.get('skipDangerousModePermissionPrompt'): yield warn(f'Claude Code bypass-mode warning is turned off ({where})')
+    dirs = p.get('additionalDirectories') if isinstance(p.get('additionalDirectories'), list) else []
+    if top := [d for d in dirs if isinstance(d, str) and os.path.expanduser(d.rstrip('/') or '/') in ('/', HOME, '/home')]:
+        yield warn(f'Claude Code treats {", ".join(top)} as part of every project ({where}): it reads your SSH keys and tokens there without '
+                   'asking, and in accept-edits mode changes your shell start-up files and its own settings', 'List only the folders it needs')
     wide = [a for a in p.get('allow', []) if a in WIDE_BASH]
     if wide: yield warn(f'Claude Code may run {", ".join(wide)} without asking ({where})', 'Allow specific commands instead of whole shells')
     if s.get('enableAllProjectMcpServers'):
