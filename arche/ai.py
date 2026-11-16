@@ -6,7 +6,7 @@ import hashlib, io, json, os, pickletools, re, zipfile
 from struct import error as struct_error
 from pathlib import Path
 from .hardening import argv
-from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check, action
+from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check, action, have
 
 try: from .malware import match as _match
 except ImportError: _match = None
@@ -62,7 +62,7 @@ SECRET_S = [(k, re.compile(p)) for k, p in SECRETS]
 SECRET_B = [(k, re.compile(p.encode())) for k, p in SECRETS]
 FAKE = r'(?i)x{5}|your|example|changeme|placeholder|redacted|dummy|abcdef|123456'   # docs, templates and test fixtures, not keys
 FAKE_S, FAKE_B = re.compile(FAKE), re.compile(FAKE.encode())
-SCAN_EXT = {'.md', '.sh', '.bash', '.zsh', '.fish', '.py', '.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx', '.json', '.ps1', '.psm1',
+SCAN_EXT = {'.md', '.mdc', '.sh', '.bash', '.zsh', '.fish', '.py', '.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx', '.json', '.ps1', '.psm1',
             '.bat', '.cmd', '.vbs', '.rb', '.pl', '.php', '.lua', '.html', '.htm', '.toml', '.yaml', '.yml', '.txt', ''}
 PRUNE = {'node_modules', '.git', '.cache', '.local', '.var', '.steam', 'Steam', '.cargo', '.rustup', 'go', '.npm', '.nvm',
          'venv', '.venv', 'site-packages', 'target', 'dist', 'build', '.wine', 'Games', 'snap'}
@@ -778,6 +778,26 @@ def repos():
     return sorted(roots)
 
 
+def autorun_rows(r, rr):
+    """Commands a folder runs by itself once an editor, dev container or aider opens it."""
+    for t in (jsonc(f'{r}/.vscode/tasks.json').get('tasks') or []):
+        if isinstance(t, dict) and (t.get('runOptions') or {}).get('runOn') == 'folderOpen':
+            yield warn(f'{rr}/.vscode/tasks.json runs a command as soon as the folder is opened: {redact(t.get("command", ""))[:120]}',
+                       'Remove "runOn": "folderOpen" unless you wrote it')
+    # initializeCommand runs on this PC, not in the container, when you choose "Reopen in Container" (the other hooks run inside it)
+    for f in files(f'{r}/.devcontainer.json', f'{r}/.devcontainer/devcontainer.json', f'{r}/.devcontainer/*/devcontainer.json'):
+        if c := jsonc(f).get('initializeCommand'):
+            c = ' '.join(map(str, c.values() if isinstance(c, dict) else c if isinstance(c, list) else [c]))
+            yield item(f'{rr}{f[len(r):]} runs on this PC, outside the container, when you open it in a dev container: {redact(c)[:120]}')
+            yield from scan_text(c, f'{rr}{f[len(r):]} initializeCommand')
+    # aider reads .aider.conf.yml at the repo root: lint-cmd runs after every edit (auto-lint is on), test-cmd with auto-test, yes-always skips its prompts
+    # ponytail: one-line values only; a YAML list under lint-cmd is missed
+    if ac := re.findall(r'^(lint-cmd|test-cmd|yes-always)\s*:\s*(\S.*)$', text(f'{r}/.aider.conf.yml'), re.M):
+        for k, v in ac: yield from scan_text(v, f'{rr}/.aider.conf.yml {k}')
+        yield warn(f'{rr}/.aider.conf.yml sets what aider runs there: {redact("; ".join(f"{k}: {v.strip()}" for k, v in ac))[:160]}',
+                   "In a repo you cloned that is its authors' command: read it before running aider there")
+
+
 @check('Project agent configs', FAM)
 def projects():
     for r in repos():
@@ -810,16 +830,7 @@ def projects():
                 yield from scan_text(cmd, f'Project hook {ev} ({rr})')
             if hs: yield warn(f'{tilde(f)} runs {len(hs)} command(s) whenever an agent works in {rr} (hooks)',
                               "In a repo you cloned that is its authors' code: read it before trusting the folder")
-        for t in (jsonc(f'{r}/.vscode/tasks.json').get('tasks') or []):
-            if isinstance(t, dict) and (t.get('runOptions') or {}).get('runOn') == 'folderOpen':
-                yield warn(f'{rr}/.vscode/tasks.json runs a command as soon as the folder is opened: {redact(t.get("command", ""))[:120]}',
-                           'Remove "runOn": "folderOpen" unless you wrote it')
-        # aider reads .aider.conf.yml at the repo root: lint-cmd runs after every edit (auto-lint is on), test-cmd with auto-test, yes-always skips its prompts
-        # ponytail: one-line values only; a YAML list under lint-cmd is missed
-        if ac := re.findall(r'^(lint-cmd|test-cmd|yes-always)\s*:\s*(\S.*)$', text(f'{r}/.aider.conf.yml'), re.M):
-            for k, v in ac: yield from scan_text(v, f'{rr}/.aider.conf.yml {k}')
-            yield warn(f'{rr}/.aider.conf.yml sets what aider runs there: {redact("; ".join(f"{k}: {v.strip()}" for k, v in ac))[:160]}',
-                       "In a repo you cloned that is its authors' command: read it before running aider there")
+        yield from autorun_rows(r, rr)
         for f in files(*(f'{r}/{x}' for x in INSTRUCTION_FILES), f'{r}/.cursor/rules/*', f'{r}/.claude/commands/*.md',
                        f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md'):
             yield from scan_text(text(f), tilde(f))
@@ -1136,6 +1147,18 @@ def models():
     if n: yield item('Pickle-format model files were checked for code that runs on load')
 
 
+def git_rows(root):
+    """A .git folder that came in an archive (a clone never brings one): its config can run commands on every git status, and its hooks on commit."""
+    from .persistence import git_runs
+    if have('git') and os.path.isfile(f'{root}/.git/config'):
+        for k, v in git_runs(sh('git', 'config', '--file', f'{root}/.git/config', '-l')):
+            yield warn(f'{root}/.git/config makes git run a command ({k}): {redact(v)[:120]}', 'Delete its .git folder, or that key, before running git or opening it in an editor')
+    for h in files(f'{root}/.git/hooks/*'):   # zip drops the executable bit, so every hook counts
+        if not h.endswith('.sample'):
+            yield warn(f'{h}: a git hook, runs when you commit, check out or merge there', 'Delete it unless you know why it is there')
+            yield from scan_text(text(h), h)
+
+
 MAGIC = {b'\x7fELF': 'Linux program', b'MZ': 'Windows program', b'\xcf\xfa\xed\xfe': 'macOS program', b'\xca\xfe\xba\xbe': 'macOS program'}
 
 
@@ -1171,6 +1194,10 @@ def vet_rows(root):
             for hook in ('preinstall', 'install', 'postinstall', 'prepare'):
                 if cmd := scripts.get(hook):
                     yield (alert if WORM.search(str(cmd)) else warn)(f'{p}: runs on npm install ({hook}): {redact(cmd)[:160]}', 'Read what it runs before installing')
+    if os.path.isdir(root):
+        yield from autorun_rows(root, root)
+        for f in files(f'{root}/.claude/settings.json', f'{root}/.claude/settings.local.json'): yield from claude_settings(jsonf(f), f)
+        yield from git_rows(root)
     if bins: yield warn(f'Ships {len(bins)} compiled program(s) this check cannot read: {", ".join(bins[:3])}' + (f' and {len(bins) - 3} more' if len(bins) > 3 else ''),
                         'Skills rarely need one. If a plugin does, get it from the project\'s own releases, or check it with ClamAV and VirusTotal')
     yield from malware.engine_hits([root], malware.clam([root]))
