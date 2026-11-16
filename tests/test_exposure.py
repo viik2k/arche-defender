@@ -71,4 +71,39 @@ class Gateway(unittest.TestCase):
         self.assertEqual(exposure.maker('02:00:00:00:00:01'), 'randomised or virtual address')
 
 
+class Tunnels(unittest.TestCase):
+    def test_ssh_reverse(self):
+        R = exposure.ssh_reverse
+        self.assertEqual(R(['ssh', '-R', '80:localhost:8080', 'serveo.net']), 'serveo.net')
+        self.assertEqual(R(['ssh', '-p', '443', '-NfR0:localhost:3000', 'a.pinggy.io']), 'a.pinggy.io')
+        self.assertEqual(R(['ssh', '-oServerAliveInterval=30', '-NR', '9000:localhost:22', 'me@vps.example']), 'me@vps.example')
+        self.assertIsNone(R(['ssh', '-L', '8080:localhost:80', 'host']))
+        self.assertIsNone(R(['ssh', 'host', 'ls', '-R']))   # -R of the remote command
+
+    def test_rows(self):
+        procs = [('10', ['/usr/bin/cloudflared', '--no-autoupdate', 'tunnel', 'run', '--token', 'eyJx']),
+                 ('11', ['/usr/bin/cloudflared', 'proxy-dns']),                 # a DNS-over-HTTPS proxy, not a tunnel
+                 ('12', ['/opt/playit/playit-linux-amd64']), ('13', ['ssh', '-R', '80:localhost:80', 'nokey@localhost.run']),
+                 ('14', ['ssh', '-NR', '2222:localhost:22', 'me@vps.example']), ('15', [])]
+        r = [(t, s) for t, s, _ in exposure.tunnel_rows(procs)]
+        self.assertEqual(r, [('Cloudflare Tunnel is publishing a port on this PC to the internet (process 10: /usr/bin/cloudflared)', WARN),
+                             ('playit.gg is publishing a port on this PC to the internet (process 12: /opt/playit/playit-linux-amd64)', WARN),
+                             ('ssh -R is publishing a port on this PC to the internet through nokey@localhost.run (process 13)', WARN),
+                             ('SSH reverse tunnel (ssh -R): me@vps.example can reach into this PC', INFO)])
+        self.assertFalse(any('eyJx' in t for t, _ in r))   # tokens on the command line stay hidden
+
+    def test_tailscale(self):
+        serve = {'TCP': {'443': {'HTTPS': True}, '8443': {'HTTPS': True}}, 'AllowFunnel': {'pc.tail1234.ts.net:443': True},
+                 'Foreground': {'abc': {'TCP': {'10000': {'HTTPS': True}}, 'AllowFunnel': {'pc.tail1234.ts.net:10000': True}}}}
+        prefs = {'RunSSH': True, 'AdvertiseRoutes': ['192.168.4.0/24', '0.0.0.0/0', '::/0'], 'ExitNodeID': '', 'DriveShares': [{'Name': 'docs'}]}
+        r = [(t, s) for t, s, _ in exposure.tailscale_rows(prefs, serve)]
+        self.assertEqual(r, [('Tailscale Funnel publishes ports 443, 10000 on this PC to the whole internet', WARN),
+                             ('Tailscale Serve shares port 8443 with your tailnet', INFO),
+                             ('Tailscale SSH is on: devices your tailnet policy allows can log in to this PC', INFO),
+                             ('This PC offers itself as a Tailscale exit node for your tailnet', INFO),
+                             ('This PC routes your tailnet into 192.168.4.0/24 (subnet router)', INFO),
+                             ('Taildrive shares docs with your tailnet', INFO)])
+        self.assertEqual(list(exposure.tailscale_rows({'ShieldsUp': False}, {})), [])
+
+
 if __name__ == '__main__': unittest.main()

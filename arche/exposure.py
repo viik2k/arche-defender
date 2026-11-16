@@ -1,11 +1,12 @@
 # Network exposure: which listening services the firewall actually lets other machines reach, container ports
 # Docker publishes around firewalld, and port forwards the router opened through UPnP.
 # Also the router's identity, and another device claiming its hardware address (ARP spoofing).
+# Tunnels that let the internet in past both: Tailscale Funnel and friends, ngrok, Cloudflare Tunnel, ssh -R.
 # What listens at all is persistence.py's 'Network listeners'; the zones themselves are hardening.py's 'Firewall rules'.
-import ipaddress, re, socket, time, urllib.parse, urllib.request
+import ipaddress, json, os, re, socket, time, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
-from .core import check, warn, item, sh, have, text
-from .hardening import INFRA_IF
+from .core import check, warn, item, sh, have, text, files
+from .hardening import INFRA_IF, argv
 
 RISKY = {21: 'FTP', 23: 'Telnet', 139: 'Windows file sharing (SMB)', 445: 'Windows file sharing (SMB)',
          2375: 'Docker API without TLS (root on this PC for anyone who connects)', 3306: 'MySQL', 3389: 'Remote desktop (RDP)',
@@ -176,3 +177,85 @@ def local():
     neigh = {ip: mac.lower() for ip, mac in re.findall(r'^(\S+) dev \S+ lladdr (\S+)', sh('ip', '-4', 'neigh', 'show'), re.M)}
     for gw in dict.fromkeys(re.findall(r'^default via (\S+)', sh('ip', '-4', 'route', 'show', 'default'), re.M)):
         yield from gateway_rows(gw, neigh)
+
+
+# Programs whose job is to publish a port on this PC to the internet; attackers use the same ones to keep a way in.
+TUNNELS = {'ngrok': 'ngrok', 'cloudflared': 'Cloudflare Tunnel', 'frpc': 'frp', 'bore': 'bore', 'zrok': 'zrok', 'playit': 'playit.gg',
+           'chisel': 'chisel', 'inlets': 'inlets', 'loophole': 'loophole', 'loclx': 'LocalXpose'}
+PUBLIC_SSH = re.compile(r'(^|@)(serveo\.net|(\w+\.)?localhost\.run|(\w+\.)?pinggy\.io|srv\.us|tuns\.sh|tunnel\.pyjam\.as)$')
+SSH_ARG_OPTS = 'BbcDEeFIiJLlmOoPpQRSWw'   # ssh options that take a value
+TUNNEL_FIX = ('If you did not start it, this is how attackers keep a way in: kill {pid}, then look for what started it under '
+              'Startup entries, Services and Scheduled tasks.')
+
+
+def ssh_reverse(a):
+    """The destination of an `ssh -R` command line, else None.
+    ponytail: RemoteForward set in ~/.ssh/config or with -o is not seen; parse the config if that matters."""
+    rev, dest, it = False, None, iter(a[1:])
+    for x in it:
+        if x.startswith('-') and len(x) > 1:
+            i = next((i for i, c in enumerate(x[1:]) if c in SSH_ARG_OPTS), None)   # the value is the rest, or the next word
+            if i is None: continue
+            rev |= x[1 + i] == 'R'
+            if i == len(x) - 2: next(it, None)
+        elif dest is None: dest = x
+        else: break   # the remote command
+    return dest if rev else None
+
+
+def tunnel_rows(procs):
+    """procs: (pid, argv). The command line is not shown: tunnel tokens are often passed on it."""
+    for pid, a in procs:
+        if not a: continue
+        name = os.path.basename(a[0])
+        key = next((k for k in TUNNELS if name == k or name.startswith(k + '-')), None)
+        if key and (key != 'cloudflared' or 'tunnel' in a):
+            yield warn(f'{TUNNELS[key]} is publishing a port on this PC to the internet (process {pid}: {a[0]})', fix=TUNNEL_FIX.format(pid=pid))
+        elif name == 'ssh' and (dest := ssh_reverse(a)):
+            if PUBLIC_SSH.search(dest):
+                yield warn(f'ssh -R is publishing a port on this PC to the internet through {dest} (process {pid})', fix=TUNNEL_FIX.format(pid=pid))
+            else: yield item(f'SSH reverse tunnel (ssh -R): {dest} can reach into this PC', fix=TUNNEL_FIX.format(pid=pid))
+
+
+def serve_ports(cfg, key):
+    """Ports under `key` ('TCP' or 'AllowFunnel') in a Tailscale ServeConfig, foreground sessions included."""
+    out = set()
+    for k, v in (cfg.items() if isinstance(cfg, dict) else ()):
+        if k == key and isinstance(v, dict): out |= {str(p).rsplit(':', 1)[-1] for p, on in v.items() if on}
+        elif isinstance(v, dict): out |= serve_ports(v, key)
+    return out
+
+
+def ports(ps): return ('port ' if len(ps) == 1 else 'ports ') + ', '.join(sorted(ps, key=lambda p: (len(p), p)))
+
+
+def tailscale_rows(prefs, serve):
+    funnel, shared = serve_ports(serve, 'AllowFunnel'), serve_ports(serve, 'TCP')
+    if funnel: yield warn(f'Tailscale Funnel publishes {ports(funnel)} on this PC to the whole internet',
+                          fix='Anyone can reach it, not just your tailnet. Check with: tailscale funnel status; stop with: tailscale funnel reset')
+    if shared - funnel: yield item(f'Tailscale Serve shares {ports(shared - funnel)} with your tailnet',
+                                   fix='Check with: tailscale serve status; stop with: tailscale serve reset')
+    if prefs.get('RunSSH'): yield item('Tailscale SSH is on: devices your tailnet policy allows can log in to this PC',
+                                       fix='Turn it off with: sudo tailscale set --ssh=false')
+    if prefs.get('RunWebClient'): yield item('Tailscale web client is on: its settings page is open to your tailnet on port 5252',
+                                             fix='Turn it off with: sudo tailscale set --webclient=false')
+    routes = prefs.get('AdvertiseRoutes') or []
+    if {'0.0.0.0/0', '::/0'} & set(routes): yield item('This PC offers itself as a Tailscale exit node for your tailnet',
+                                                        fix='Stop with: sudo tailscale set --advertise-exit-node=false')
+    if lan := [r for r in routes if r not in ('0.0.0.0/0', '::/0')]:
+        yield item(f'This PC routes your tailnet into {", ".join(lan)} (subnet router)', fix='Stop with: sudo tailscale set --advertise-routes=')
+    if prefs.get('ExitNodeID') or prefs.get('ExitNodeIP'):
+        yield item('Your internet traffic goes out through a Tailscale exit node', fix='That device sees where you go. Stop with: tailscale set --exit-node=')
+    if shares := [d.get('Name', '?') for d in prefs.get('DriveShares') or [] if isinstance(d, dict)]:
+        yield item(f'Taildrive shares {", ".join(shares)} with your tailnet', fix='Stop sharing with: tailscale drive unshare <name>')
+
+
+@check('Tunnels to the internet', 'Network')
+def tunnels():
+    """Ways in that skip the router and the firewall: Tailscale Funnel, Serve, SSH, subnet routes and exit nodes, and running
+    tunnel programs (ngrok, Cloudflare Tunnel, frp, playit.gg, ssh -R to serveo and the like)."""
+    if have('tailscale'):
+        try: yield from tailscale_rows(json.loads(sh('tailscale', 'debug', 'prefs', timeout=10) or '{}') or {},
+                                       json.loads(sh('tailscale', 'serve', 'status', '--json', timeout=10) or '{}') or {})
+        except ValueError: pass   # tailscaled is not running
+    yield from tunnel_rows((d[6:], argv(d[6:])) for d in files('/proc/[0-9]*'))
