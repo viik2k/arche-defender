@@ -134,6 +134,34 @@ def sshd():
     if opt.get('permitemptypasswords') == 'yes': yield alert('sshd accepts empty passwords', 'PermitEmptyPasswords no')
 
 
+
+MITM = 'SSH connects to a server it has never seen, or whose key changed, without asking: a machine in the middle reads the session'
+SSH_RISK = {('forwardagent', 'yes'): ('every server you log in to can use your SSH keys while you are connected: a hacked one logs in '
+                                      'everywhere else as you', 'ForwardAgent yes only under the Host blocks you trust, or use ProxyJump'),
+            ('forwardx11', 'yes'): ('every server you log in to can see and type into your desktop (X11 forwarding)',
+                                    'ForwardX11 no; use ssh -X for the one session that needs it'),
+            ('stricthostkeychecking', 'no'): (MITM, 'Remove it, or use accept-new (asks nothing for new servers, refuses changed keys)'),
+            ('stricthostkeychecking', 'off'): (MITM, 'Remove it, or use accept-new (asks nothing for new servers, refuses changed keys)'),
+            ('userknownhostsfile', '/dev/null'): (MITM, 'Remove UserKnownHostsFile /dev/null')}
+
+
+def ssh_client_rows(t, where):
+    """SSH client settings that apply to every host (top of the file, Host *, Match all): a per-host one is a choice for that host."""
+    every = True
+    for line in t.splitlines():
+        if not (m := re.match(r'\s*(\w+)(?:\s*=\s*|\s+)(.+?)\s*$', line)) or line.lstrip().startswith('#'): continue
+        k, v = m[1].lower(), m[2].strip('"').lower()
+        if k in ('host', 'match'): every = v.split() in (['*'], ['all'], ['final', 'all'])
+        elif every and (k, v) in SSH_RISK: yield warn(f'{where}: {m[1]} {m[2]} for every host: {SSH_RISK[k, v][0]}', SSH_RISK[k, v][1])
+
+
+@check('SSH client', 'Protection')
+def ssh_client():
+    """SSH client settings that hand servers your keys or desktop, or skip the check that catches a fake server."""
+    for f in files('/etc/ssh/ssh_config', '/etc/ssh/ssh_config.d/*.conf', '~/.ssh/config', '~/.ssh/config.d/*'):
+        yield from ssh_client_rows(text(f), f.replace(HOME, '~'))
+
+
 SECRET_FILES = ('~/.netrc', '~/.git-credentials', '~/.aws/credentials', '~/.config/gh/hosts.yml', '~/.docker/config.json',
                 '~/.kube/config', '~/.pgpass', '~/.npmrc', '~/.pypirc', '~/.config/rclone/rclone.conf', '~/.ssh/config',
                 '~/.claude.json', '~/.claude/.credentials.json', '~/.codex/auth.json', '~/.config/gcloud/credentials.db',
