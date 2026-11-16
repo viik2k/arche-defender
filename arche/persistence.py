@@ -1,0 +1,163 @@
+# Persistence and tampering sweep: the places malware hides to survive a reboot, plus what is exposed right now.
+import glob, json, os, re
+from pathlib import Path
+from .core import HOME, alert, item, ver, sh, text, lines, files, jsonf, check
+
+SENSITIVE = 'sudo|su|ssh|pkexec|passwd|doas|run0'
+RC_FILES = ('~/.bashrc', '~/.bash_profile', '~/.bash_login', '~/.profile', '~/.zshrc', '~/.zprofile', '~/.bashrc.d/*',
+            '~/.config/fish/config.fish', '~/.config/environment.d/*.conf', '/etc/environment')
+
+
+@check('Running programs', 'Processes')
+def running():
+    exes = set()
+    for p in glob.glob('/proc/[0-9]*/exe'):
+        try: exes.add(os.readlink(p))
+        except OSError: pass   # ponytail: other users' processes (root daemons) are unreadable without root
+    drop = re.compile(rf'^(/tmp/|/var/tmp/|/dev/shm/|/memfd:|{re.escape(HOME)}/Downloads/)')
+    plain = []
+    for e in sorted(exes):
+        if drop.match(e): yield alert(f'Running from a drop folder: {e}')
+        elif e.endswith(' (deleted)'): yield item(ver(f'Running a replaced binary (restart it after updates): {e}'))
+        else: plain.append(e)
+    out = sh('rpm', '-qf', *plain, err=True) if plain else ''
+    for m in re.finditer(r'file (.+?)(?: is not owned by any package|: No such file or directory)$', out, re.M):
+        yield item(ver(f'Not from a package: {m[1]}'))   # /app/... is a Flatpak
+
+
+@check('Network listeners', 'Network')
+def listeners():
+    # Keyed by process, not port. Loopback and ephemeral ports (Tailscale, Steam pick new ones every start) skipped.
+    for l in sh('ss', '-tlnpH').splitlines():
+        f = l.split()
+        if len(f) < 4: continue
+        addr, _, port = f[3].rpartition(':')
+        if re.match(r'^(127\.|\[?::1\]?$)', addr) or addr.endswith('%lo') or not port.isdigit() or int(port) >= 32768: continue
+        m = re.search(r'\(\("([^"]+)"', l)
+        yield item(m[1] if m else f'port {port} (owned by another user)')
+
+
+@check('Startup entries', 'Persistence')
+def startup():
+    for f in files('~/.config/autostart/*.desktop', '/etc/xdg/autostart/*.desktop'):
+        t = text(f); ex = re.search(r'^Exec=(.*)$', t, re.M)
+        if ex: yield item(ver(f'{f} -> {ex[1]}' + (' (disabled)' if re.search(r'^Hidden=true', t, re.M) else '')))
+    for f in files('~/.config/plasma-workspace/env/*', '~/.config/plasma-workspace/shutdown/*', '~/.config/autostart-scripts/*', '/etc/profile.d/*'):
+        yield item(f'Script: {f}')
+    for f in files(*RC_FILES):
+        for l in lines(text(f)): yield item(f'{f}: {l}')
+
+
+@check('Scheduled tasks', 'Persistence')
+def scheduled():
+    for user in ([], ['--user']):
+        out = sh('systemctl', *user, 'list-timers', '--all', '-o', 'json')
+        for t in json.loads(out or '[]'): yield item(f'Timer: {t["unit"]} -> {t["activates"]}')
+    for l in lines(sh('crontab', '-l')): yield item(f'crontab: {l}')
+    for f in files('/etc/crontab', '/etc/anacrontab', '/etc/cron.d/*'):
+        for l in lines(text(f)): yield item(f'{f}: {l}')
+    for f in files('/etc/cron.hourly/*', '/etc/cron.daily/*', '/etc/cron.weekly/*', '/etc/cron.monthly/*'): yield item(f'Script: {f}')
+
+
+@check('Services', 'Persistence')
+def services():
+    # Units from packages live in /usr; /run holds desktop app launches and autostart copies. The rest was added by hand.
+    for user in ([], ['--user']):
+        units = [u['unit'] for u in json.loads(sh('systemctl', *user, 'list-units', '--all', '--type=service', '-o', 'json') or '[]')]
+        for block in sh('systemctl', *user, 'show', '-p', 'Id,FragmentPath,ExecStart', *units).split('\n\n') if units else []:
+            p = dict(l.split('=', 1) for l in block.splitlines() if '=' in l)
+            frag = p.get('FragmentPath', '')
+            if not frag or frag.startswith(('/usr/', '/run/', '/dev/')): continue
+            argv = re.search(r'argv\[\]=(.*?) ;', p.get('ExecStart', ''))
+            yield item(ver(f'{p["Id"]} [{"user" if user else "system"}] -> {argv[1] if argv else frag}'))
+
+
+@check('Hijack points', 'Persistence')
+def hijack():
+    for l in lines(text('/etc/ld.so.preload')): yield alert(f'/etc/ld.so.preload: {l}')
+    for f in files('/etc/environment', '~/.config/environment.d/*.conf', '/etc/environment.d/*.conf'):
+        for l in lines(text(f)):
+            if re.search(r'\bLD_(PRELOAD|LIBRARY_PATH|AUDIT)\b', l): yield alert(f'{f}: {l}')
+    for f in files(*(f'{d}/{c}' for d in ('~/.local/bin', '~/bin', '~/.cargo/bin', '/usr/local/bin', '/usr/local/sbin') for c in SENSITIVE.split('|'))):
+        yield alert(f'Shadows a system command: {f}')
+    for f in files(*RC_FILES):
+        for l in lines(text(f)):
+            if re.match(rf'(alias\s+({SENSITIVE})=|function\s+({SENSITIVE})\b|({SENSITIVE})\s*\(\))', l): yield alert(f'{f} redefines: {l}')
+    for f in files('/etc/pam.d/*'):
+        for l in lines(text(f)):
+            if 'pam_exec' in l: yield alert(f'{f}: {l}')
+    for f in files('/etc/udev/rules.d/*.rules'):
+        for l in lines(text(f)):
+            if 'RUN' in l: yield item(f'{f}: {l}')
+
+
+@check('Network settings', 'Network')
+def network():
+    for l in lines(text('/etc/hosts')): yield item('hosts: ' + ' '.join(l.split()))
+    dns = {s for l in sh('resolvectl', 'dns').splitlines() for s in l.partition(': ')[2].split()}
+    for s in sorted(dns or re.findall(r'^nameserver\s+(\S+)', text('/etc/resolv.conf'), re.M)): yield item(f'DNS server: {s}')
+    for k in ('http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'):
+        if os.environ.get(k): yield item(f'Proxy ({k}): {os.environ[k]}')
+    kio = text(f'{HOME}/.config/kioslaverc')
+    if re.search(r'^ProxyType=[1-9]', kio, re.M):
+        for m in re.finditer(r'^(ProxyType|\w*[pP]roxy|Proxy Config Script)=(.+)$', kio, re.M): yield item(f'KDE proxy {m[1]}: {m[2]}')
+
+
+REMOTE = {'sshd', 'sshd-session', 'xrdp', 'krdpserver', 'x11vnc', 'wayvnc', 'Xvnc', 'rustdesk', 'anydesk', 'teamviewerd', 'sunshine'}
+
+
+@check('Remote access and accounts', 'Network')
+def remote():
+    for c in sorted({text(p).strip() for p in glob.glob('/proc/[0-9]*/comm')} & REMOTE): yield item(f'Running: {c}')
+    for f in files('~/.ssh/authorized_keys', '~/.ssh/authorized_keys2'):
+        for l in lines(text(f)):
+            m = re.search(r'((?:ssh|ecdsa|sk)-\S+)\s+(\S+)\s*(.*)', l)
+            if m: yield item(f'SSH key accepted: {l[:m.start()]}{m[1]} ...{m[2][-12:]} {m[3]}'.rstrip())
+    for f in files('~/.ssh/rc'): yield item(f'Runs on every SSH login: {f}')
+    for s in re.findall(r'^\s*\[([^\]]+)\]', text('/etc/samba/smb.conf'), re.M):
+        if s.lower() not in ('global', 'homes', 'printers', 'print$'): yield item(f'Samba share: {s}')
+    for l in lines(text('/etc/exports')): yield item(f'NFS export: {l}')
+    for l in text('/etc/passwd').splitlines():
+        f = l.split(':')
+        if len(f) < 7 or not f[2].isdigit(): continue
+        if f[2] == '0' and f[0] != 'root': yield alert(f'Second root account (uid 0): {f[0]}')
+        elif int(f[2]) >= 1000 and not f[6].endswith(('nologin', 'false')): yield item(f'Login account: {f[0]} ({f[6]})')
+    for m in sh('getent', 'group', 'wheel').strip().rpartition(':')[2].split(','):
+        if m: yield item(f'Admin (wheel): {m}')
+
+
+CHROMIUM = (('Chrome', 'google-chrome', 'com.google.Chrome'), ('Chromium', 'chromium', 'org.chromium.Chromium'),
+            ('Edge', 'microsoft-edge', 'com.microsoft.Edge'), ('Brave', 'BraveSoftware/Brave-Browser', 'com.brave.Browser'),
+            ('Vivaldi', 'vivaldi', 'com.vivaldi.Vivaldi'), ('Helium', 'net.imput.helium', 'net.imput.helium'))
+
+
+@check('Browser extensions', 'Persistence')
+def browsers():
+    hosts = ['/etc/opt/chrome/native-messaging-hosts', '/etc/chromium/native-messaging-hosts', '/etc/opt/edge/native-messaging-hosts',
+             '~/.mozilla/native-messaging-hosts', '/usr/lib64/mozilla/native-messaging-hosts', '/usr/lib/mozilla/native-messaging-hosts']
+    for name, sub, flat in CHROMIUM:
+        for root in (f'{HOME}/.config/{sub}', f'{HOME}/.var/app/{flat}/config/{sub}'):
+            hosts.append(f'{root}/NativeMessagingHosts')
+            for mf in files(f'{root}/*/Extensions/*/*/manifest.json'):
+                j, d = jsonf(mf), os.path.dirname(mf)
+                title = j.get('name', '?')
+                if m := re.match(r'^__MSG_(.+)__$', title):
+                    for loc in files(*(f'{d}/_locales/{x}/messages.json' for x in ('en', 'en_US', 'en_GB')))[:1]:
+                        msgs = {k.lower(): v for k, v in jsonf(loc).items()}
+                        title = msgs.get(m[1].lower(), {}).get('message') or title
+                wide = ' (all sites)' if re.search(r'<all_urls>|\*://\*/|https?://\*/', f'{j.get("permissions")} {j.get("host_permissions")}') else ''
+                yield item(f'{name}: {title} [{Path(d).parent.name}]{wide}')
+    for ext in files('~/.mozilla/firefox/*/extensions.json', '~/.config/mozilla/firefox/*/extensions.json',
+                     '~/.var/app/org.mozilla.firefox/.mozilla/firefox/*/extensions.json'):
+        for a in jsonf(ext).get('addons', []):
+            if a.get('location') == 'app-profile': yield item(f'Firefox: {(a.get("defaultLocale") or {}).get("name")} [{a.get("id")}]')
+    for h in files(*(f'{d}/*.json' for d in hosts)):
+        yield item(ver(f'Native host: {Path(h).stem} -> {jsonf(h).get("path")}'))
+
+
+@check('Kernel modules', 'Persistence')
+def modules():
+    # ponytail: out-of-tree/unsigned modules are inventory, not alerts: the NVIDIA driver is both on a stock Nobara install.
+    for l in text('/proc/modules').splitlines():
+        m = l.split()[0]; t = text(f'/sys/module/{m}/taint')
+        if 'O' in t or 'E' in t: yield item(f'{m} ({"out-of-tree" if "O" in t else "in-tree"}{", unsigned" if "E" in t else ""})')
