@@ -195,6 +195,12 @@ def secret_kinds(t):
     return sorted(kinds)
 
 
+def market_src(m):
+    """Where a Claude Code plugin marketplace comes from: a GitHub repo, a git URL or a local path."""
+    src = m.get('source') if isinstance(m, dict) and isinstance(m.get('source'), dict) else {}
+    return str(src.get('repo') or src.get('url') or src.get('path') or '?')
+
+
 @check('AI plugins, skills and hooks', FAM)
 def plugins():
     st = jsonf(f'{HOME}/.claude/settings.json')
@@ -203,8 +209,7 @@ def plugins():
         d = max(files(f'~/.claude/plugins/cache/{market}/{name}/*'), key=os.path.getmtime, default=None)   # newest installed version
         yield item(f'Claude Code plugin {k} ({"enabled" if on else "disabled"})' + (f', code {fingerprint(d)}' if d else ''))
     for name, m in jsonf(f'{HOME}/.claude/plugins/known_marketplaces.json').items():
-        src = m.get('source', {}) if isinstance(m, dict) else {}
-        yield item(f'Claude Code plugin marketplace {name}: {src.get("repo") or src.get("url") or src.get("path") or "?"}')
+        yield item(f'Claude Code plugin marketplace {name}: {market_src(m)}')
     for root in SKILL_DIRS:
         for sk in files(f'{root}/*/SKILL.md', f'{root}/SKILL.md', f'{root}/*.md', f'{root}/*/gemini-extension.json'):
             nm = re.search(r'^name:\s*(.+)$', text(sk), re.M)
@@ -576,6 +581,13 @@ def projects():
             if n and f.endswith('/settings.json'):   # settings.local.json is yours; settings.json is shared, so it comes with a clone
                 yield warn(f'{tilde(f)} runs {n} command(s) whenever Claude Code works in {rr} (hooks, status line, helpers)',
                            "In a repo you cloned that is its authors' code: read it before trusting the folder")
+            mk = s.get('extraKnownMarketplaces') if isinstance(s.get('extraKnownMarketplaces'), dict) else {}
+            on = [k for k, v in s['enabledPlugins'].items() if v] if isinstance(s.get('enabledPlugins'), dict) else []
+            if (mk or on) and f.endswith('/settings.json'):   # trusting the folder offers to install them; plugins bring hooks and MCP servers
+                what = [f'marketplace {", ".join(f"{k} ({market_src(v)})" for k, v in mk.items())}' if mk else '',
+                        f'plugins {", ".join(on)}' if on else '']
+                yield warn(f'{tilde(f)} asks Claude Code to install {" and ".join(filter(None, what))} when you trust {rr}',
+                           'In a repo you cloned, decline unless you know that marketplace; check a plugin first with: arche-defender vet FOLDER')
         for t in (jsonc(f'{r}/.vscode/tasks.json').get('tasks') or []):
             if isinstance(t, dict) and (t.get('runOptions') or {}).get('runOn') == 'folderOpen':
                 yield warn(f'{rr}/.vscode/tasks.json runs a command as soon as the folder is opened: {redact(t.get("command", ""))[:120]}',

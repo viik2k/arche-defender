@@ -252,6 +252,15 @@ def test_project_mcp():
     try: rows = list(ai.projects())
     finally: ai.repos = real
     assert any(s == 2 and 'py.instructions.md' in t for t, s, _ in rows), rows
+    os.makedirs(f'{r}/.claude')
+    for n, body in (('settings.local.json', '{"enabledPlugins": {"mine@me": true}}'),
+                    ('settings.json', '{"extraKnownMarketplaces": {"acme": {"source": {"source": "github", "repo": "acme/tools"}}},'
+                                      ' "enabledPlugins": {"deploy@acme": true, "old@acme": false}}')):
+        open(f'{r}/.claude/{n}', 'w').write(body)
+    real, ai.repos = ai.repos, lambda: [r]
+    try: rows = [t for t, s, _ in ai.projects() if s == 1 and 'install' in t]
+    finally: ai.repos = real
+    assert len(rows) == 1 and 'acme (acme/tools)' in rows[0] and 'deploy@acme' in rows[0] and 'old@acme' not in rows[0], rows
 
 
 
