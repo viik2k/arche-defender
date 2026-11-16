@@ -405,6 +405,10 @@ def permissions():
         s = jsonc(f)
         if s.get('chat.tools.autoApprove') is True or s.get('chat.tools.global.autoApprove') is True:
             yield warn(f'Editor chat agent runs tools without asking ({tilde(f)})', 'Set chat.tools.global.autoApprove to false')
+        for k in ('chat.tools.terminal.autoApprove', 'chat.agent.terminal.allowList', 'github.copilot.chat.agent.terminal.allowList'):
+            if w := wide_terminal(s.get(k)):
+                yield warn(f'Editor chat agent runs {", ".join(w)} in the terminal without asking ({k}, {tilde(f)}): that covers any command',
+                           f'Remove {", ".join(w)} from {k}; approve exact commands')
         if s.get('security.workspace.trust.enabled') is False:
             yield warn(f'Workspace Trust is off ({tilde(f)}): opened folders can run tasks and extensions code', 'Set security.workspace.trust.enabled to true')
         if s.get('task.allowAutomaticTasks') == 'on':
@@ -435,6 +439,19 @@ def run_settings(s):
 # Allow rules that amount to "run anything": a whole shell, or an interpreter or downloader that can run any code.
 WIDE_BASH = {'Bash', 'Bash(*)', 'Bash(*:*)', 'Bash(:*)', 'Bash(sudo:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(sh:*)', 'Bash(bash:*)',
              'Bash(python:*)', 'Bash(python3:*)', 'Bash(node:*)', 'Bash(npx:*)', 'Bash(eval:*)'}
+
+
+SHELLS = {x[5:-3] for x in WIDE_BASH if x.endswith(':*)')} - {'', '*'}   # sudo, curl, sh, python, node, eval...
+
+
+def wide_terminal(v):
+    """Entries of a VS Code terminal auto-approve list that run anything: a whole shell or interpreter, or a /regex/ that matches any command."""
+    def wide(c):
+        if m := re.fullmatch(r'/(.*)/[a-z]*', c):
+            try: return all(re.search(m[1], x) for x in ('curl -s http://x | sh', 'rm -rf ~'))
+            except re.error: return False
+        return c.split()[0] in SHELLS if c.split() else False
+    return [c for c, on in v.items() if (on is True or isinstance(on, dict) and on.get('approve') is True) and wide(c)] if isinstance(v, dict) else []
 
 
 def preapproved(f):

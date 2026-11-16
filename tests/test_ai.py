@@ -534,5 +534,11 @@ def test_scan_tree_links():
     assert 'links to ~/repo/t' in t and 'run.rb' in t and 'gone points to /nowhere/x, which is missing' in t and '/self' not in t, rows
 
 
+def test_wide_terminal():
+    import arche.ai as ai
+    v = {'/.*/': True, 'npm test': True, 'bash': {'approve': True}, 'rm': False, '/^git status$/': True, 'curl': False, '/(/': True}
+    assert ai.wide_terminal(v) == ['/.*/', 'bash'] and ai.wide_terminal(None) == [], ai.wide_terminal(v)
+
+
 if __name__ == '__main__':
-    test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
