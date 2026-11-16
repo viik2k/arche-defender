@@ -27,6 +27,7 @@ def test_npm_yarn_go_git():
     assert rows('npm', '@acme:registry=https://npm.pkg.github.com\n//registry.npmjs.org/:_authToken=${NPM_TOKEN}\n', True) == \
         [(0, 'f: npm gets packages from https://npm.pkg.github.com')]
     assert [s for s, _ in rows('npm', '//npm.pkg.github.com/:_authToken=ghp_abc123\n', True)] == [1]
+    assert [s for s, _ in rows('npm', 'node-options=--require /home/x/.cache/h.js\nscript-shell=/tmp/sh\n# script-shell=bash\nnode-options=\n')] == [1, 1]
     assert [s for s, _ in rows('npm', '//npm.pkg.github.com/:_authToken=ghp_abc123\n')] == []   # your own ~/.npmrc: hardening checks its mode
     assert [s for s, _ in rows('yarn', 'enableStrictSsl: false\nhttpProxy: "http://proxy.lan:3128"\n')] == [1]
     assert [s for s, _ in rows('go', 'GOINSECURE=example.com\nGOSUMDB=off\nGOPROXY=http://goproxy.lan\n')] == [1, 1, 1, 0]

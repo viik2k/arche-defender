@@ -18,7 +18,9 @@ RULES = {   # kind: (pattern, what it means, fix); a match on a line is a warnin
     'uv': ((r'index-strategy\s*=\s*["\']unsafe-', 'lets uv mix versions from several indexes (dependency confusion)',
             'Remove index-strategy: the default, first-index, is safe'),
            (r'allow-insecure-host\s*=', f'turns off TLS checks for a package index: {TLS}', 'Remove allow-insecure-host')),
-    'npm': ((r'^\s*strict-ssl\s*=\s*false', f'turns off TLS checks for the npm registry: {TLS}', 'Remove strict-ssl=false'),),
+    'npm': ((r'^\s*strict-ssl\s*=\s*false', f'turns off TLS checks for the npm registry: {TLS}', 'Remove strict-ssl=false'),
+            (r'^\s*(script-shell|node-options)\s*=\s*\S', 'changes what every npm script runs with (script-shell, or node-options '
+             'such as --require that loads a file into each Node process npm starts)', 'Remove that line unless you put it there')),
     'yarn': ((r'enableStrictSsl:\s*false|^\s*strict-ssl\s+false', f'turns off TLS checks for the registry: {TLS}', 'Remove that setting'),
              (r'unsafeHttpWhitelist:', f'lets yarn fetch packages over plain HTTP: {TLS}', 'Remove unsafeHttpWhitelist')),
     'go': ((r'^\s*GOINSECURE=\S', f'fetches Go modules without TLS checks: {TLS}', 'go env -u GOINSECURE'),
