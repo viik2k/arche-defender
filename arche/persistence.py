@@ -230,6 +230,10 @@ def remote():
     for g in ('wheel', 'sudo', 'admin'):   # Fedora/Arch, Debian/Ubuntu, old Ubuntu
         for m in sh('getent', 'group', g).strip().rpartition(':')[2].split(','):
             if m: yield item(f'Admin ({g}): {m}')
+    for g in ('docker', 'lxd', 'libvirt', 'disk'):   # root without sudo: mount / into a container or VM, or write the raw disk
+        for m in sh('getent', 'group', g).strip().rpartition(':')[2].split(','):
+            if m: yield warn(f'{m} is in the {g} group: any program {m} runs can make itself root, with no password',
+                             f'If you do not need it: sudo gpasswd -d {m} {g}' + (' (rootless Docker or Podman does the job without it)' if g == 'docker' else ''))
 
 
 CHROMIUM = (('Chrome', 'google-chrome', 'com.google.Chrome'), ('Chromium', 'chromium', 'org.chromium.Chromium'),
