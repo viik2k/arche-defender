@@ -97,6 +97,9 @@ def analyse(events):
         if ssh_bad.get(ip, 0) >= BURST:
             yield alert(f'SSH login as {user} from {ip} succeeded after {ssh_bad[ip]} failures',
                         fix='Treat the account as compromised: change its password, check ~/.ssh/authorized_keys, block the address.')
+        elif hit := intel.ip_hit(ip):
+            yield alert(f'SSH login as {user} from {ip}, an address on threat list {hit}',
+                        fix='Treat the account as compromised: change its password, check ~/.ssh/authorized_keys, block the address.')
         else: yield item(f'SSH login as {user} from {ip} ({how})')
 
 

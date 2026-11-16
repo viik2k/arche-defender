@@ -33,6 +33,9 @@ class Analyse(unittest.TestCase):
         self.assertEqual(r['5 failed SSH logins from 203.0.113.9'], WARN)       # invalid-user lines counted once
         self.assertEqual(r['SSH login as root from 203.0.113.9 succeeded after 5 failures'], ALERT)
         self.assertEqual(r['SSH login as finn from 192.168.4.20 (publickey)'], INFO)
+        with mock.patch.object(intel, 'ip_hit', lambda ip: 'feodo' if ip == '198.51.100.4' else None):
+            self.assertEqual([(t, s) for t, s, _ in logs.analyse([(1, 'sshd', 'Accepted publickey for finn from 198.51.100.4 port 2 ssh2')])],
+                             [('SSH login as finn from 198.51.100.4, an address on threat list feodo', ALERT)])
 
     def test_tamper(self):
         sudo = lambda c: (0, 'sudo', f'finn : TTY=pts/1 ; PWD=/home/finn ; USER=root ; COMMAND={c}')
