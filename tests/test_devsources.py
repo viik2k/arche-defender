@@ -45,5 +45,14 @@ def test_uv_and_pyproject():
     assert rows('cargo', '[source.crates-io]\nreplace-with = "vendored-sources"\n') == [(0, 'f: cargo gets packages from vendored-sources')]
 
 
+def test_conda_gem_maven_composer():
+    assert [s for s, _ in rows('conda', 'channels:\n  - conda-forge\n  - http://conda.lan/main\nssl_verify: false\n')] == [1, 1]
+    assert [s for s, _ in rows('gem', '---\n:sources:\n- http://rubygems.org/\n')] == [1]
+    xml = ('<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">\n<!-- <mirror><url>http://example.lan/m2</url></mirror> -->\n'
+           '<mirrors><mirror><url>https://repo.maven.apache.org/maven2</url></mirror><mirror><url>http://nexus.lan/repo</url></mirror></mirrors>\n')
+    assert rows('maven', xml) == [(1, 'f fetches code over plain HTTP from nexus.lan: ' + __import__('arche.devsources').devsources.TLS)], rows('maven', xml)
+    assert [s for s, _ in rows('composer', '{\n "config": {\n  "secure-http": false\n }\n}')] == [1]
+
+
 if __name__ == '__main__':
-    test_pip(); test_requirements_from_a_cloned_repo(); test_npm_yarn_go_git(); test_uv_and_pyproject(); print('ok')
+    test_conda_gem_maven_composer(); test_pip(); test_requirements_from_a_cloned_repo(); test_npm_yarn_go_git(); test_uv_and_pyproject(); print('ok')
