@@ -37,7 +37,9 @@ def test_mcp():
     assert unpinned({'command': 'npx', 'args': ['-y', '@acme/mcp']})
     assert not unpinned({'command': 'npx', 'args': ['-y', '@acme/mcp@1.2.3']})
     assert not unpinned({'command': 'node', 'args': ['server.js']})
-    assert secret_kinds('{"env": {"KEY": "sk-ant-api03-' + 'a' * 40 + '"}}') == ['Anthropic key']
+    assert secret_kinds('{"env": {"KEY": "sk-ant-api03-' + 'Q2x7Rk9wLm3vT8hJ' * 3 + '"}}') == ['Anthropic key']
+    assert secret_kinds(b'sk-ant-api03-' + b'Q2x7Rk9wLm3vT8hJ' * 3) == ['Anthropic key'] and secret_kinds('task-' + 'a' * 40) == []
+    assert secret_kinds('Bearer abcdefghijklmnopqrstu; OPENAI_API_KEY=sk-' + 'x' * 40 + '; xoxb-your-token-here; ghp_' + 'ab' * 18 + ' iVBOR/AIza' + 'Q2x7Rk9wLm3' * 3 + ' bob:ghp_abcdefghijklmnopqrstuvwxyz0123456789@') == []
 
 
 def test_running():
@@ -155,5 +157,18 @@ def test_hub_code():
     assert any(s == 1 and 'download piped into a shell' in t for t, s, _ in rows), rows
 
 
+
+def test_chat_secrets():
+    from arche import ai
+    d = tmp()
+    open(os.path.join(d, 'a.jsonl'), 'w').write('{"text": "deploy with ghp_' + 'Q2x7Rk9wLm3vT8hJzP4n' + 'y6Bc5Vd1Fg0H"}\n')
+    open(os.path.join(d, 'b.jsonl'), 'w').write('{"text": "use OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}\n')
+    real, ai.CHATS = ai.CHATS, (('Agent', (f'{d}/*.jsonl',), 'tip'),)
+    try: rows = list(ai.chat_secrets())
+    finally: ai.CHATS = real
+    assert [(s, t.split(' (')[0]) for t, s, _ in rows] == [(0, f'Agent keeps your conversations in {d}'), (1, f'{d}/a.jsonl')], rows
+    assert 'GitHub token' in rows[1][0] and rows[1][2].endswith('; tip'), rows
+
+
 if __name__ == '__main__':
-    test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

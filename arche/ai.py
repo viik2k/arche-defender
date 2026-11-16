@@ -41,10 +41,16 @@ AI_RULES = [(n, s, re.compile(p, re.I), h) for n, s, p, h in (
     ('rewrites agent permissions or hooks', WARN, r'(>>?|\btee\b|write_text|writeFile\w*\(|json\.dump)[^\n]{0,80}\.claude/settings(\.local)?\.json',
      ('.claude/settings',)),
 )]
-SECRET = re.compile(r'sk-ant-[\w-]{20,}|sk-(?:proj-)?[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_\w{30,}|xox[abpr]-[\w-]{10,}|'
-                    r'AIza[\w-]{30,}|hf_[A-Za-z0-9]{30,}|glpat-[\w-]{20,}|(?<=Bearer )[\w.~+/=-]{16,}|eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}')
-SECRET_KIND = (('sk-ant-', 'Anthropic key'), ('sk-', 'OpenAI-style key'), ('gh', 'GitHub token'), ('github_pat_', 'GitHub token'),
-               ('xox', 'Slack token'), ('AIza', 'Google key'), ('hf_', 'Hugging Face token'), ('glpat-', 'GitLab token'), ('eyJ', 'JWT'))
+SECRETS = (('Anthropic key', r'sk-ant-[\w-]{20,}'), ('OpenAI-style key', r'sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}'),
+           ('GitHub token', r'gh[pousr]_[A-Za-z0-9]{30,}'), ('GitHub token', r'github_pat_\w{30,}'), ('Slack token', r'xox[abpr]-\d+-[\w-]{10,}'),
+           ('Google key', r'AIza[\w-]{30,}'), ('Hugging Face token', r'hf_[A-Za-z0-9]{30,}'), ('GitLab token', r'glpat-[\w-]{20,}'),
+           ('bearer token', r'Bearer (?=[\w.~+/=-]*\d)[\w.~+/=-]{16,}'), ('JWT', r'eyJ[\w-]{10,}\.[\w-]{10,}\.[\w-]{10,}'))
+SECRET = re.compile('|'.join(p for _, p in SECRETS).replace('Bearer ', '(?<=Bearer )'))   # redact keeps the word "Bearer"
+# ponytail: one literal-led pattern per kind, so re's fast prefix search runs: 6x quicker on GBs of transcripts than SECRET
+SECRET_S = [(k, re.compile(p)) for k, p in SECRETS]
+SECRET_B = [(k, re.compile(p.encode())) for k, p in SECRETS]
+FAKE = r'(?i)x{5}|your|example|changeme|placeholder|redacted|dummy|abcdef|123456'   # docs, templates and test fixtures, not keys
+FAKE_S, FAKE_B = re.compile(FAKE), re.compile(FAKE.encode())
 SCAN_EXT = {'.md', '.sh', '.bash', '.py', '.js', '.mjs', '.cjs', '.ts', '.json', '.ps1', '.toml', '.yaml', '.yml', '.txt', ''}
 PRUNE = {'node_modules', '.git', '.cache', '.local', '.var', '.steam', 'Steam', '.cargo', '.rustup', 'go', '.npm', '.nvm',
          'venv', '.venv', 'site-packages', 'target', 'dist', 'build', '.wine', 'Games', 'snap'}
@@ -148,10 +154,13 @@ def unpinned(s):
 
 
 def secret_kinds(t):
+    """Sorted kinds of key or token in t (str or bytes), never the values."""
     kinds = set()
-    for m in SECRET.finditer(t):
-        s = m.group(0)
-        kinds.add(next((k for p, k in SECRET_KIND if s.startswith(p)), 'bearer token'))
+    for k, p in SECRET_B if isinstance(t, bytes) else SECRET_S:
+        for m in p.finditer(t):   # a key starts a word: not "task-...", not mid-base64 (a \b in the pattern would cost 15x)
+            c, v = t[m.start() - 1:m.start()], m[0]
+            if not (c.isalnum() or c in ('_', '-', '/', '+', b'_', b'-', b'/', b'+') or len(set(v)) < 12
+                    or (FAKE_B if isinstance(t, bytes) else FAKE_S).search(v)): kinds.add(k); break
     return sorted(kinds)
 
 
@@ -544,6 +553,38 @@ def model_risks(p):
         if m: yield ALERT, f'its chat template reaches into Python ({m[0]}): code runs when it is used for chat'
         for r in scan_text(t, p):
             if r[1] == ALERT: yield ALERT, f'its chat template: {r[0]}'
+
+
+CHATS = (('Claude Code', ('~/.claude/projects/*/*.jsonl', '~/.claude/projects/*/*/subagents/*.jsonl', '~/.claude/history.jsonl'),
+          'Set "cleanupPeriodDays" in ~/.claude/settings.json to keep fewer days of history'),
+         ('Codex', ('~/.codex/sessions/*/*/*/*.jsonl', '~/.codex/history.jsonl'), 'history.persistence = "none" in ~/.codex/config.toml stops the prompt log'),
+         ('Gemini CLI', ('~/.gemini/tmp/*/chats/*.json', '~/.gemini/tmp/*/logs.json'), None),
+         ('opencode', ('~/.local/share/opencode/storage/*/*/*.json', '~/.local/share/opencode/storage/*/*/*/*.json'), None),
+         ('Continue', ('~/.continue/sessions/*.json',), None),
+         ('Cursor', ('~/.config/Cursor/User/globalStorage/state.vscdb*', '~/.config/Cursor/User/workspaceStorage/*/state.vscdb*'), None),
+         ('Windsurf', ('~/.config/Windsurf/User/globalStorage/state.vscdb*', '~/.config/Windsurf/User/workspaceStorage/*/state.vscdb*'), None),
+         ('Copilot Chat', ('~/.config/Code/User/workspaceStorage/*/chatSessions/*.json',
+                           '~/.config/Code/User/globalStorage/github.copilot-chat/session-store.db*'), None))
+
+
+@check('Secrets in AI chat history', FAM, slow=True)
+def chat_secrets():
+    """Keys an agent read (a .env, a config, a pasted token) stay in its transcript, in plain text, for good."""
+    for app, pats, tip in CHATS:
+        fs = files(*pats)
+        if not fs: continue
+        yield item(f'{app} keeps your conversations in {tilde(os.path.commonpath(fs))}')
+        hits = []
+        for f in fs:
+            try:
+                with open(f, 'rb') as fh: b = fh.read(256 << 20)   # ponytail: first 256 MB of a transcript; stream it if they grow past that
+            except OSError: continue
+            if k := secret_kinds(b): hits.append((os.path.getmtime(f), f, k))
+        for _, f, k in sorted(hits, reverse=True)[:10]:
+            yield warn(f'{tilde(f)} ({app} conversation) holds {", ".join(k)} in plain text',
+                       'Rotate the key: any skill, plugin or install script that reads your home folder gets it. '
+                       f'Then delete the file{"; " + tip if tip else ""}')
+        if len(hits) > 10: yield warn(f'{len(hits) - 10} more {app} conversations hold keys in plain text', tip)
 
 
 HF_HUB = os.path.join(os.environ.get('HF_HOME') or f'{HOME}/.cache/huggingface', 'hub')
