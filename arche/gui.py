@@ -47,7 +47,7 @@ def gui():
     for tag, c in (('alert', RED), ('warn', ORANGE), ('new', AMBER), ('fix', MUTED), ('head', FG)): det.tag_configure(tag, foreground=c)
     det.tag_configure('head', font=('TkDefaultFont', 11, 'bold'), spacing1=8, spacing3=4)
 
-    results, q, busy, refs = {}, queue.Queue(), [], {}   # refs: text tag -> (check, row text, is ignored) for right-click
+    results, q, busy, refs = {}, queue.Queue(), [], {}   # refs: text tag -> (check, row text, is ignored, fix) for right-click
     hist, mon = list(core.jsonf(core.HISTORY) or []), {}   # busy holds the running scan's kind ('quick', 'full', or None for a partial re-scan)
     tree.insert('', 'end', 'overview', text='  Overview', tags=('family',))
     for n, c in CHECKS.items():
@@ -57,15 +57,16 @@ def gui():
     def rows_line(r):
         return MARK.get(r.sev, '[+] ' if r.new else '    ') + r.text + '\n', 'alert' if r.sev == ALERT else 'warn' if r.sev else 'new' if r.new else ''
 
-    def ref(n, t, ignored=False):
-        refs[f'r{len(refs)}'] = (n, t, ignored)
+    def ref(n, t, ignored=False, fix=None):
+        refs[f'r{len(refs)}'] = (n, t, ignored, fix)
         return f'r{len(refs) - 1}'
 
     def write_rows(n, rows):
         for r in rows:
             line, tag = rows_line(r)
-            det.insert('end', line, (tag, ref(n, r.text)) if tag else ref(n, r.text))
-            if r.fix and (r.sev or r.new): det.insert('end', f'      fix: {r.fix}\n', 'fix')
+            k = ref(n, r.text, fix=r.fix)
+            det.insert('end', line, (tag, k) if tag else k)
+            if r.fix and (r.sev or r.new): det.insert('end', f'      fix: {r.fix}\n', ('fix', k))
 
     def show(_=None):
         sel = (tree.selection() or ('overview',))[0]
@@ -174,12 +175,13 @@ def gui():
     def context(e):
         hit = next((refs[t] for t in det.tag_names(f'@{e.x},{e.y}') if t in refs), None)
         if not hit: return
-        n, t, ignored = hit
+        n, t, ignored, fix = hit
         m = tk.Menu(det, tearoff=0, bg=PANEL, fg=FG)
         if ignored: m.add_command(label='Show this finding again', command=lambda: (set_ignored(n, t, False), start(False, [n])))
         else: m.add_command(label='Ignore this finding', command=lambda: (set_ignored(n, t), results.__setitem__(
             n, [r for r in results[n] if r.text != t]), paint(n), headline(), show()))
         m.add_command(label='Copy', command=lambda: (root.clipboard_clear(), root.clipboard_append(f'{n}: {t}')))
+        if fix: m.add_command(label='Copy the fix', command=lambda: (root.clipboard_clear(), root.clipboard_append(fix)))
         m.tk_popup(e.x_root, e.y_root)
 
     det.bind('<Button-3>', context)
