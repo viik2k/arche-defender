@@ -473,6 +473,20 @@ def test_auto_approve():
     assert not ai.APPROVALS_OFF.search('gemini --approval-mode auto_edit')
 
 
+def test_trusted_dirs():
+    import json
+    from arche import ai
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    for g in ('Repos/a/.git', 'Repos/b/.git', 'Downloads', 'Desktop/x', '.gemini'): os.makedirs(f'{d}/{g}')
+    json.dump({'projects': {f'{d}/Downloads': {'hasTrustDialogAccepted': True}, f'{d}/Repos': {'hasTrustDialogAccepted': True},
+                            f'{d}/Repos/a': {'hasTrustDialogAccepted': True}, f'{d}/Repos/b': {}}}, open(f'{d}/.claude.json', 'w'))
+    json.dump({f'{d}/Desktop/x': 'TRUST_PARENT', f'{d}/Repos/b': 'DO_NOT_TRUST'}, open(f'{d}/.gemini/trustedFolders.json', 'w'))
+    home, ai.HOME = ai.HOME, d
+    try: rows = [t.split(' and every')[0] for t, s, _ in ai.permissions() if ' and every folder under it' in t and s == 1]
+    finally: ai.HOME = home
+    assert rows == ['Claude Code trusts ~/Downloads', 'Claude Code trusts ~/Repos', 'Gemini CLI trusts ~/Desktop'], rows
+
+
 def test_plugin_manifests():
     from arche import ai, core
     d, old = tempfile.mkdtemp(), dict(os.environ); atexit.register(shutil.rmtree, d, True)
@@ -497,4 +511,4 @@ def test_plugin_manifests():
 
 
 if __name__ == '__main__':
-    test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

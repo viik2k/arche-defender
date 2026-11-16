@@ -304,10 +304,33 @@ AUTO_APPROVE = (('~/.config/zed/settings.json', r'"always_allow_tool_actions"\s*
                 ('~/.config/crush/crush.json', r'"allowed_tools"\s*:\s*\[[^\]]*"bash"', 'Crush', 'Remove "bash" from permissions.allowed_tools'))
 
 
+def trusted_dirs():
+    """(agent, folder, fix) for every folder Claude Code or Gemini CLI was told to trust; the folders under it are trusted with it."""
+    c = jsonf(f'{HOME}/.claude.json')
+    for d, v in (c.get('projects') if isinstance(c, dict) and isinstance(c.get('projects'), dict) else {}).items():
+        if isinstance(v, dict) and v.get('hasTrustDialogAccepted'): yield 'Claude Code', d, f'Remove "{d}" from projects in ~/.claude.json'
+    g = jsonf(f'{HOME}/.gemini/trustedFolders.json')
+    for d, v in (g.items() if isinstance(g, dict) else ()):   # TRUST_PARENT trusts the folder above it
+        if v in ('TRUST_FOLDER', 'TRUST_PARENT'): yield 'Gemini CLI', os.path.dirname(d) if v == 'TRUST_PARENT' else d, f'Remove "{d}" from ~/.gemini/trustedFolders.json'
+
+
+# Folders where downloads and clones land; trusting one trusts whatever arrives in it.
+BROAD = ('/', '/home', '/tmp', '', '/Desktop', '/Downloads', '/Documents')   # the last four under your home folder
+
+
 @check('AI agent permissions', FAM)
 def permissions():
     for f in files('~/.claude/settings.json', '~/.claude/settings.local.json', '/etc/claude-code/managed-settings.json'):
         yield from claude_settings(jsonf(f), tilde(f))
+    # A trusted folder skips the trust prompt for every folder under it, so a repo cloned or unpacked there loads its own hooks,
+    # MCP servers and settings at once; two git repos below one trusted folder (two levels down at most) count as broad too.
+    # ponytail: Codex [projects] trust_level is left out; it trusts a repo root, not what is under a parent
+    broad = {*BROAD[:3], *(HOME + x for x in BROAD[3:])}
+    for agent, d, fix in trusted_dirs():
+        d = os.path.normpath(d)
+        if d in broad or len(n := files(f'{d}/*/.git', f'{d}/*/*/.git')) > 1:
+            yield warn(f'{agent} trusts {tilde(d)} and every folder under it{f" ({len(n)} repos)" if d not in broad else ""}: a repo you '
+                       'clone or unpack there loads its own hooks, MCP servers and settings without the trust prompt', f'{fix}, and trust projects one by one')
     codex = text(f'{HOME}/.codex/config.toml')
     if re.search(r'^\s*approval_policy\s*=\s*"never"', codex, re.M):
         yield warn('Codex runs commands without asking (approval_policy = "never")', 'Use "on-request" in ~/.codex/config.toml')
