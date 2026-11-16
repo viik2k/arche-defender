@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import shutil, tempfile, unittest
+import shutil, tempfile, time, unittest
 from pathlib import Path
 from unittest import mock
 from arche import updates
@@ -22,9 +22,21 @@ class Pending(unittest.TestCase):
         for cached, want in (([], ['1 package updates waiting']), (['/var/cache/libdnf5/f/repodata/x-updateinfo.xml.zst'],
                              ['1 security updates waiting, 1 critical', '1 package updates waiting'])):
             with mock.patch.object(updates, 'have', lambda c: c == 'dnf'), mock.patch.object(updates, 'sh', sh), \
-                 mock.patch.object(updates, 'files', lambda *g: cached if 'updateinfo' in g[0] else []):
+                 mock.patch.object(updates, 'files', lambda *g: cached if 'updateinfo' in g[0] else []), \
+                 mock.patch.object(updates, 'list_age', lambda *g: 0):
                 self.assertEqual([t for t, _, _ in updates.pending()], want)
         self.assertEqual([c.args[3] for c in sh.call_args_list], ['check-upgrade', 'check-upgrade', 'advisory'])
+
+    def test_stale_list(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(updates.list_age(f'{d}/*/repomd.xml'))
+            for name, days in (('a', 30), ('b', 9)):
+                os.makedirs(f'{d}/{name}'); open(f'{d}/{name}/repomd.xml', 'w').close()
+                os.utime(f'{d}/{name}/repomd.xml', (time.time() - days * 86400 - 60,) * 2)
+            self.assertEqual(updates.list_age(f'{d}/*/repomd.xml'), 9)
+        with mock.patch.object(updates, 'have', lambda c: c == 'dnf'), mock.patch.object(updates, 'sh', lambda *a, **k: ''), \
+             mock.patch.object(updates, 'list_age', lambda *g: 9):
+            self.assertEqual([t for t, _, _ in updates.pending() if 'list' in t], ['The update list was last downloaded 9 days ago, so newer updates are not counted'])
 
 
 class Snaps(unittest.TestCase):

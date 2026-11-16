@@ -33,6 +33,15 @@ def newest_same_flavor(running, installed):
     return max(same, key=natural) if same else running
 
 
+STALE_LIST = 7   # days
+
+
+def list_age(*globs):
+    """Days since the package manager last downloaded its update list (newest repo index), or None if it never has."""
+    ts = [os.path.getmtime(f) for f in files(*globs)]
+    return int((time.time() - max(ts)) / 86400) if ts else None
+
+
 @check('Pending updates', 'Updates')
 def pending():
     """Package updates waiting (from the package manager's cached metadata; no download) and a newer kernel than the running one."""
@@ -41,12 +50,17 @@ def pending():
         # dnf -C only knows advisories whose updateinfo is cached; repos without it (Nobara, most third-party) save a second
         sec = [l for l in sh('dnf', '-C', '-q', 'advisory', 'list', '--security', timeout=120).splitlines() if re.match(r'^\S+-\d', l)] \
             if files('/var/cache/libdnf5/*/repodata/*updateinfo*', '/var/cache/dnf/*/repodata/*updateinfo*') else []
+        age = list_age('~/.cache/libdnf5/*/repodata/repomd.xml', '/var/cache/libdnf5/*/repodata/repomd.xml', '/var/cache/dnf/*/repodata/repomd.xml')
     elif have('apt'):
         ups = [l for l in sh('apt', 'list', '--upgradable', timeout=120).splitlines() if '/' in l]
         sec = [l for l in ups if '-security' in l]
+        age = list_age('/var/lib/apt/periodic/update-success-stamp', '/var/lib/apt/lists/*_InRelease')
     elif have('checkupdates'):
-        ups, sec = sh('checkupdates', timeout=120).splitlines(), []   # Arch has no security metadata
-    else: ups, sec = [], []
+        ups, sec, age = sh('checkupdates', timeout=120).splitlines(), [], 0   # Arch has no security metadata; checkupdates syncs its own list
+    else: ups, sec, age = [], [], 0
+    # the counts below come from the cached list, so an old list reads as "nothing waiting"
+    if age is None: yield warn('No update list has been downloaded, so waiting updates cannot be counted', fix=UPGRADE)
+    elif age > STALE_LIST: yield warn(f'The update list was last downloaded {age} days ago, so newer updates are not counted', fix=UPGRADE)
     if sec:
         crit = sum('Critical' in l for l in sec)
         yield (alert if crit else warn)(f'{len(sec)} security updates waiting' + (f', {crit} critical' if crit else ''), fix=UPGRADE)
