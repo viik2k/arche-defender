@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import hashlib, io, unittest
+import hashlib, io, shutil, sqlite3, tempfile, time, unittest
 from unittest import mock
 from arche import intel
 
@@ -88,6 +88,24 @@ class Lookup(unittest.TestCase):
         exts = [('Brave', 'Bad', 'a' * 32, {}), ('Brave', 'uBlock Origin Lite', 'b' * 32, {})]
         with mock.patch.object(intel, 'chromium_extensions', return_value=exts):
             self.assertEqual([t for t, _, _ in intel.extensions()], [f'Brave: Bad [{"a" * 32}] is on the list of known malicious extensions'])
+
+
+class Downloads(unittest.TestCase):
+    def test_payload_url(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        db, now = f'{d}/History', (time.time() + 11644473600) * 1e6
+        con = sqlite3.connect(db)
+        con.executescript('CREATE TABLE urls (url TEXT, last_visit_time INTEGER); CREATE TABLE downloads (id INTEGER, target_path TEXT, start_time INTEGER);'
+                          'CREATE TABLE downloads_url_chains (id INTEGER, chain_index INTEGER, url TEXT);')
+        con.executemany('INSERT INTO downloads VALUES (?, ?, ?)', [(1, '/home/u/Downloads/setup.sh', now), (2, '/home/u/Downloads/ok.zip', now)])
+        con.executemany('INSERT INTO downloads_url_chains VALUES (?, 0, ?)', [(1, 'https://raw.githubusercontent.com/bad/repo/main/x.sh'), (2, 'https://example.net/ok.zip')])
+        con.commit(); con.close()
+        out = parsed('mixed', ''); out['urls']['https://raw.githubusercontent.com/bad/repo/main/x.sh'] = 'URLhaus'
+        with mock.patch.object(intel, 'load', return_value=out), mock.patch.object(intel, 'feed_age_days', return_value=0), \
+                mock.patch.dict(intel.BROWSERS, {'Brave': [db]}, clear=True):
+            self.assertEqual([t for t, _, _ in intel.browsing()],
+                             ['Brave downloaded setup.sh from https://raw.githubusercontent.com/bad/repo/main/x.sh, listed by URLhaus'])
+        self.assertEqual(intel.downloads('/x/places.sqlite'), [])
 
 
 if __name__ == '__main__':

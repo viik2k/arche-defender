@@ -211,9 +211,18 @@ def history_urls(db, days=30):
     return {u for (u,) in copy_query(db, q, (since,)) if '://' in u}
 
 
+def downloads(db, days=30):
+    """(every URL in the redirect chain, saved file) for Chromium downloads in the last `days`. Firefox records a
+    download as a history visit, so history_urls already has its URL."""
+    if db.endswith('places.sqlite'): return []
+    return copy_query(db, 'SELECT c.url, d.target_path FROM downloads d JOIN downloads_url_chains c ON c.id = d.id WHERE d.start_time > ?',
+                      ((time.time() - days * 86400 + 11644473600) * 1e6,))
+
+
 @check('Browsing history', 'Threats', slow=True)
 def browsing():
-    """Sites visited in the last 30 days that a threat feed lists as phishing, malware or C2. History never leaves the PC."""
+    """Sites visited and files downloaded in the last 30 days that a threat feed lists as phishing, malware or C2.
+    History never leaves the PC."""
     if feed_age_days() is None and not CUSTOM.exists(): return
     for name, pats in BROWSERS.items():
         for db in files(*pats):
@@ -225,6 +234,12 @@ def browsing():
             for where, hit in sorted(hits.items()):
                 yield alert(f'{name} visited {where} in the last 30 days, listed by {hit}',
                             fix='If you entered a password there, change it. Run a full scan, and check Browser extensions.')
+            got = {}
+            for u, path in downloads(db):   # payload URLs (URLhaus) are often never shown as a page
+                if path and (hit := url_hit(u) or domain_hit(_host(u)) or ip_hit(_host(u))): got.setdefault(path, (u[:200], hit))
+            for path, (u, hit) in sorted(got.items()):
+                yield alert(f'{name} downloaded {os.path.basename(path)} from {u}, listed by {hit}',
+                            fix=f'If it is still there, quarantine it: arche-defender quarantine "{path}". If you ran it, run a full scan and change your passwords from another device.')
 
 
 @action('password-check', 'Check whether a password is in known data breaches (only the first 5 characters of its SHA-1 leave this PC)', arg='password')
