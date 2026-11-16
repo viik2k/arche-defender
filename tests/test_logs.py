@@ -50,5 +50,22 @@ class Analyse(unittest.TestCase):
         self.assertEqual(len(r), 5)
 
 
+
+class Installed(unittest.TestCase):
+    def test_history(self):
+        import json, time
+        now = time.time()
+        tx = json.dumps([{'command_line': 'dnf install -y evil', 'start_time': now - 60, 'altered_count': 1},
+                         {'command_line': 'dnf upgrade --refresh', 'start_time': now - 60, 'altered_count': 90},
+                         {'command_line': '', 'start_time': now - 120, 'altered_count': 2},
+                         {'command_line': 'dnf install old', 'start_time': now - 30 * 86400, 'altered_count': 1}])
+        fp = 'deploy install\tapp/com.example.App/x86_64/stable\tflathub\tuser\ndeploy install\truntime/org.kde.Platform/x86_64/6.9\tflathub\tuser\n' \
+             'deploy update\tapp/org.x.Y/x86_64/stable\tflathub\tsystem\nuninstall\tapp/org.gone.App/x86_64/stable\t\tsystem\n'
+        with mock.patch.object(logs, 'sh', side_effect=lambda *a, **k: tx if a[0] == 'dnf' else fp):
+            r = [t.split(' (')[0] for t, _, _ in logs.installed()]
+        self.assertEqual(r, ['dnf: dnf install -y evil', 'dnf: Discover or PackageKit',
+                             'Flatpak installed com.example.App from flathub', 'Flatpak removed org.gone.App from ?'])
+
+
 if __name__ == '__main__':
     unittest.main()

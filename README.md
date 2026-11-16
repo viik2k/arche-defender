@@ -50,11 +50,11 @@ else in the same check is hidden with it.
 | Persistence | XDG autostart, Plasma scripts, shell rc files, systemd timers and services, cron, udev rules, ld.so.preload, PAM, shadowed sudo/ssh, browser extensions and native messaging hosts, out-of-tree kernel modules |
 | Network | listening programs, hosts file, DNS, proxies, remote-desktop tools, SSH keys, shares, accounts; root certificates added to the system or to NSS/Firefox stores (a rogue one can read all HTTPS); saved open, WEP or WPA1 Wi-Fi that joins automatically |
 | Processes | programs running from temp or download folders, memfd, deleted binaries, executables no package owns |
-| Activity | the last week of the journal: wrong-password bursts, SSH brute force and logins after it, new accounts, new admins |
+| Activity | the last week of the journal: wrong-password bursts, SSH brute force and logins after it, new accounts, new admins; software installed or removed that week (dnf and Flatpak, routine upgrades left out) |
 | Browsers | Safe Browsing switched off (Chromium family and Firefox), saved passwords protected only by Chromium's built-in key, Firefox proxies, managed browser policies that force extensions, proxies, search engines or certificates (how adware persists) |
 | Privacy | what is using the camera, microphone or screen right now; Flatpak apps allowed outside their sandbox |
 | Devices | USB and Thunderbolt devices (a new "keyboard" can be a BadUSB), paired Bluetooth devices and KDE Connect phones |
-| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations |
+| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations; every package source (dnf repos, apt sources, Flatpak remotes) and any that skip signature or TLS checks |
 
 Without root it cannot see other users' processes, `/root`, sudoers or the sshd config; those checks say so.
 

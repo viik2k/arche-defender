@@ -1,9 +1,9 @@
 # Updates and vulnerabilities: OS support end, pending (security) package updates, reboot-needed kernels,
 # Flatpak and firmware updates, fwupd's Host Security ID, and CPU vulnerability mitigations.
 # How long since the last update is hardening.py's 'Security posture'; this module covers what is still waiting.
-import json, os, re, time
+import configparser, json, os, re, time
 from datetime import date
-from .core import check, alert, warn, item, sh, have, text, files
+from .core import check, alert, warn, item, sh, have, text, files, HOME
 
 UPGRADE = 'Update with the Nobara updater or: sudo dnf upgrade --refresh'
 
@@ -104,3 +104,41 @@ def cpu():
     if re.search(r'\bmitigations=off\b', cmd): yield alert('The kernel was booted with mitigations=off', fix='Remove mitigations=off from the kernel command line (grubby --update-kernel=ALL --remove-args=mitigations=off).')
     for m in re.findall(r'\b(nospectre_v[12]|nopti|nospec_store_bypass_disable|tsx=on|nosmap|nosmep|noibrs|noibpb)\b', cmd):
         yield warn(f'Kernel command line weakens a CPU mitigation: {m}', fix='Remove it from the kernel command line unless you need it.')
+
+
+def dnf_repo_rows(repos):
+    """Enabled dnf repos (from `dnf repo info --json`, which has the effective signature setting)."""
+    for r in repos:
+        if not r.get('is_enabled', True): continue
+        urls = [u for u in (*(r.get('base_url') or []), r.get('metalink'), r.get('mirrorlist')) if u]
+        name, host = r.get('id', '?'), re.sub(r'^\w+://([^/]+).*$', r'\1', urls[0]) if urls else 'no URL'
+        if not r.get('pkg_gpgcheck'):
+            yield warn(f'Packages from repo {name} ({host}) are installed without a signature check',
+                       fix=f'Set gpgcheck=1 in {r.get("repo_file_path") or "its .repo file"} and import the vendor key, or remove the repo.')
+        elif any(u.startswith('http://') for u in urls): yield item(f'Repo {name} is fetched over plain http ({host}); its packages are still signature-checked')
+        else: yield item(f'Package source: {name} ({host})')
+
+
+@check('Package sources', 'Updates')
+def sources():
+    """Where software comes from: every enabled repo and Flatpak remote, and any that skip signature or TLS checks."""
+    if have('dnf'):
+        try: yield from dnf_repo_rows(json.loads(sh('dnf', '-C', '-q', 'repo', 'info', '--enabled', '--json', timeout=60) or '[]'))
+        except ValueError: pass
+    for f in files('/etc/yum.repos.d/*.repo', '/etc/dnf/dnf.conf'):
+        if re.search(r'^\s*sslverify\s*=\s*(0|false|no)\b', text(f), re.M | re.I):
+            yield warn(f'{f} turns off TLS certificate checks (sslverify=0)', fix=f'Remove sslverify=0 from {f}.')
+    for f in files('/etc/apt/sources.list', '/etc/apt/sources.list.d/*'):
+        if re.search(r'trusted\s*[=:]\s*yes|allow-insecure\s*[=:]\s*yes', text(f), re.I):
+            yield warn(f'{f} trusts a source without signatures (trusted=yes)', fix='Remove trusted=yes and add the vendor key with signed-by=.')
+    c = configparser.ConfigParser(interpolation=None, strict=False)
+    for where, f in (('system', '/var/lib/flatpak/repo/config'), ('user', f'{HOME}/.local/share/flatpak/repo/config')):
+        c.clear()
+        try: c.read_string(text(f))
+        except configparser.Error: continue
+        for sec in c.sections():
+            if not (m := re.match(r'remote "(.+)"$', sec)): continue
+            if c[sec].get('gpg-verify', 'true').lower() == 'false':
+                yield warn(f'Flatpak remote {m[1]} ({where}) installs apps without a signature check',
+                           fix=f'Run: flatpak remote-modify {"--user " if where == "user" else ""}--gpg-verify {m[1]}  (or remove the remote)')
+            else: yield item(f'Flatpak remote {m[1]} ({where}): {c[sec].get("url", "?")}')

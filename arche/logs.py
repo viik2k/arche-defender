@@ -85,3 +85,23 @@ def analyse(events):
 def activity():
     """Last week of the system journal: password guessing, SSH brute force, new accounts and new admins."""
     yield from analyse(journal())
+
+
+ROUTINE = re.compile(r'\b(upgrade|update|distro-sync|makecache|check-upgrade|offline)\b')
+
+
+@check('Software installed this week', 'Activity')
+def installed():
+    """dnf transactions and Flatpak apps installed or removed in the last week (routine upgrades left out)."""
+    cut = time.time() - DAYS * 86400
+    try: tx = json.loads(sh('dnf', '-C', '-q', 'history', 'list', '--json', timeout=60) or '[]')
+    except ValueError: tx = []
+    for t in tx:
+        cmd = (t.get('command_line') or '').strip() or 'Discover or PackageKit'
+        if t.get('start_time', 0) >= cut and not ROUTINE.search(cmd):
+            yield item(f'dnf: {cmd[:120]} ({t.get("altered_count", "?")} packages, {when(t["start_time"])})')
+    since = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cut))
+    for l in sh('flatpak', 'history', f'--since={since}', '--columns=change,ref,remote,installation', timeout=30).splitlines():
+        f = l.split('\t')
+        if len(f) >= 4 and f[1].startswith('app/') and f[0] in ('deploy install', 'uninstall'):
+            yield item(f'Flatpak {"installed" if f[0] != "uninstall" else "removed"} {f[1].split("/")[1]} from {f[2] or "?"} ({f[3]})')
