@@ -6,7 +6,7 @@ from arche import intel
 
 
 def parsed(kind, body):
-    out = {'ips': {}, 'nets': [], 'domains': {}, 'hashes': {}, 'urls': {}}
+    out = {'ips': {}, 'nets': [], 'domains': {}, 'hashes': {}, 'urls': {}, 'extensions': {}}
     intel._parse(kind, body, 'feed', out)
     return out
 
@@ -22,6 +22,8 @@ class Parse(unittest.TestCase):
         self.assertIn('bad.test', parsed('domain', '*.bad.test\n')['domains'])
         c = parsed('custom', '10.9.8.0/24\nsome.host.example\n' + 'c' * 40 + '\n')
         self.assertTrue(c['nets'] and c['domains'] and c['hashes'])
+        ids = 'a' * 32 + ',' + 'p' * 32 + '\n' + 'q' * 32 + ',' + 'b' * 33
+        self.assertEqual(sorted(parsed('extid', ids)['extensions']), ['a' * 32, 'p' * 32])
 
 
 URLHAUS = """################################################################
@@ -80,6 +82,12 @@ class Lookup(unittest.TestCase):
         intel.load()['urls']['http://x.example/a'] = 'urlhaus'
         self.assertEqual(intel.url_hit('HTTP://x.example/a/'), 'urlhaus')
         self.assertIsNone(intel.url_hit('http://x.example/b'))
+
+    def test_extensions(self):
+        intel.load()['extensions'] = {'a' * 32: 'feed'}
+        exts = [('Brave', 'Bad', 'a' * 32, {}), ('Brave', 'uBlock Origin Lite', 'b' * 32, {})]
+        with mock.patch.object(intel, 'chromium_extensions', return_value=exts):
+            self.assertEqual([t for t, _, _ in intel.extensions()], [f'Brave: Bad [{"a" * 32}] is on the list of known malicious extensions'])
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@ import csv, hashlib, io, ipaddress, json, os, re, time, urllib.request, zipfile
 from pathlib import Path
 from .core import check, action, alert, warn, item, sh, text, files, jsonf, write_private, STATE, HOME
 from .browsers import copy_query
+from .persistence import chromium_extensions
 
 DIR = STATE / 'intel'
 CUSTOM = Path(os.environ.get('XDG_CONFIG_HOME') or f'{HOME}/.config') / 'arche-defender' / 'iocs.txt'   # your own indicators
@@ -19,6 +20,7 @@ FEEDS = {
     'signature-base hashes': ('https://raw.githubusercontent.com/Neo23x0/signature-base/master/iocs/hash-iocs.txt', 'hash'),
     'HaGeZi TIF': ('https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt', 'domain'),
     'Electron releases': ('https://releases.electronjs.org/releases.json', 'electron'),   # not indicators: updates.py reads it
+    'Malicious extensions': ('https://raw.githubusercontent.com/toborrm9/malicious_extension_sentry/main/Malicious-Extensions.csv', 'extid'),
 }
 KEYFILE = CUSTOM.parent / 'abusech.key'
 # Need a free abuse.ch Auth-Key (https://auth.abuse.ch/) in KEYFILE or $ABUSECH_AUTH_KEY; it goes in the URL path.
@@ -30,6 +32,7 @@ KEYED = {
 }
 HASH = re.compile(r'^[0-9a-fA-F]{32}$|^[0-9a-fA-F]{40}$|^[0-9a-fA-F]{64}$')
 DOMAIN = re.compile(r'^(?=.{4,253}$)([a-z0-9_-]{1,63}\.)+[a-z]{2,63}$')
+EXT_ID = re.compile(r'(?<![a-z])[a-p]{32}(?![a-z])')
 
 
 def auth_key(): return (os.environ.get('ABUSECH_AUTH_KEY') or text(KEYFILE)).strip()
@@ -86,6 +89,7 @@ def _abusech(body, feed, out):
 def _parse(kind, body, feed, out):
     if kind == 'abusech': return _abusech(body, feed, out)
     if kind == 'electron': return
+    if kind == 'extid': return out['extensions'].update(dict.fromkeys(EXT_ID.findall(body), feed))   # Chrome Web Store IDs
     for raw in body.splitlines():
         l = raw.strip()
         if not l or l[0] in '#;!/': continue
@@ -111,11 +115,12 @@ _cache = {}
 
 
 def load():
-    """Indicators from every downloaded feed plus your own iocs.txt: {'ips', 'nets', 'domains', 'hashes'}; reloaded when files change."""
+    """Indicators from every downloaded feed plus your own iocs.txt: {'ips', 'nets', 'domains', 'hashes', 'urls', 'extensions'};
+    reloaded when files change."""
     srcs = [(DIR / _slug(n), k, n) for n, (_, k) in {**FEEDS, **KEYED}.items()] + [(CUSTOM, 'custom', 'your iocs.txt')]
     key = tuple(os.path.getmtime(p) if p.exists() else 0 for p, _, _ in srcs)
     if _cache.get('key') != key:
-        out = {'ips': {}, 'nets': [], 'domains': {}, 'hashes': {}, 'urls': {}}
+        out = {'ips': {}, 'nets': [], 'domains': {}, 'hashes': {}, 'urls': {}, 'extensions': {}}
         for p, kind, name in srcs: _parse(kind, text(p), name, out)
         _cache.update(key=key, data=out)
     return _cache['data']
@@ -154,6 +159,16 @@ def status():
     elif age > STALE_DAYS: yield warn(f'Threat intel feeds are {age} days old', fix='Run: arche-defender intel-update')
     if not auth_key(): yield item('abuse.ch feeds (URLhaus, MalwareBazaar, ThreatFox) are off',
                                   fix=f'Get a free Auth-Key at https://auth.abuse.ch/, save it in {KEYFILE} (chmod 600), then run intel-update.')
+
+
+@check('Malicious browser extensions', 'Threats')
+def extensions():
+    """Installed Chrome, Chromium, Brave, Edge and Vivaldi extensions the Chrome Web Store pulled for malware."""
+    bad = load()['extensions']
+    for name, title, eid, _ in chromium_extensions():
+        if eid in bad: yield alert(f'{name}: {title} [{eid}] is on the list of known malicious extensions',
+                                   fix='Remove it on the browser\'s extensions page, then change the passwords for sites you used while it was installed '
+                                       'and sign out of them everywhere: such extensions read pages, cookies and what you type.')
 
 
 def peers():
