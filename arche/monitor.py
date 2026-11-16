@@ -13,7 +13,8 @@ WEEK = 7 * 86400
 # download, persistence and ransomware detection with no daemon.
 WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'), 'Startup entries': ('%h/.config/autostart',),
          'Services': ('%h/.config/systemd/user',), 'Ransomware tripwire': ('%h/Documents', '%h/Pictures'),
-         'Command hooks': ('%h/.local/share/dbus-1/services', '%h/.local/share/applications', '%h/.local/share/kio/servicemenus')}
+         'Command hooks': ('%h/.local/share/dbus-1/services', '%h/.local/share/applications', '%h/.local/share/kio/servicemenus'),
+         'Desktop add-ons': ('%h/.local/share/plasma/plasmoids', '%h/.local/share/kwin/scripts', '%h/.local/share/gnome-shell/extensions')}
 ALSO = {'Ransomware tripwire': ('Encrypted files',)}   # same trigger: encryption that misses the decoys still alarms
 URGENT = {'Ransomware tripwire'}   # runs at once and at normal priority: encryption saturates the disk, idle I/O would starve it
 
