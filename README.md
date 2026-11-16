@@ -55,7 +55,7 @@ Every complete scan's score is kept, so the Overview shows whether the machine i
 | Browsers | Safe Browsing switched off (Chromium family and Firefox), saved passwords protected only by Chromium's built-in key, Firefox proxies and security prefs turned down in about:config (unsigned extensions, old TLS, certificate pinning, mixed content, HSTS preload), managed browser policies that force extensions, proxies, search engines or certificates (how adware persists); browsers started (right now, by a launcher, or by a `*-flags.conf` file) with remote debugging on your real profile (how cookie stealers get past Chrome's app-bound encryption), `--load-extension`, `--ignore-certificate-errors` or a proxy |
 | Privacy | what is using the camera, microphone or screen right now; Flatpak apps allowed outside their sandbox; camera, location, screenshot and remote-control grants the desktop portals remember (remote control of mouse and keyboard without asking is a warning); passwords, tokens and keys left in shell and REPL history files (counted, never shown); password-manager exports, private keys, card numbers and wallet recovery phrases saved as plain files in Desktop, Documents and Downloads (only the kind is shown) |
 | Devices | USB and Thunderbolt devices (a new "keyboard" can be a BadUSB), paired Bluetooth devices and KDE Connect phones |
-| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations; every package source (dnf repos, apt sources, Flatpak remotes) and any that skip signature or TLS checks; known-vulnerable and malicious dependencies pinned in your code projects' lockfiles (npm, pnpm, Cargo, uv, requirements.txt), from the last `deps-update` |
+| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations; every package source (dnf repos, apt sources, Flatpak remotes) and any that skip signature or TLS checks; apps that bundle their own Chromium (Electron: VS Code, Discord, Obsidian, AppImages and Flatpaks included) on an Electron version that no longer gets security fixes; known-vulnerable and malicious dependencies pinned in your code projects' lockfiles (npm, pnpm, Cargo, uv, requirements.txt), from the last `deps-update` |
 
 Without root it cannot see other users' processes, `/root`, sudoers or the sshd config; those checks say so.
 
@@ -95,7 +95,7 @@ Also in the window's **Tools** menu.
 
 `intel-update` fetches keyless feeds: Feodo Tracker, SSLBL, Emerging Threats compromised IPs, Spamhaus DROP (v4 and v6),
 signature-base C2 and hash IOCs, and HaGeZi's threat-intel domains. Matching happens offline against connections, file
-hashes and browsing history. To also get **URLhaus** (malicious URLs, matched by exact URL), **MalwareBazaar** (sample
+hashes and browsing history. It also fetches Electron's release list, to know which bundled browser engines are still patched. To also get **URLhaus** (malicious URLs, matched by exact URL), **MalwareBazaar** (sample
 hashes from the last 48 hours) and **ThreatFox** (C2 IPs, domains, URLs and hashes), get a free Auth-Key at
 <https://auth.abuse.ch/> and save it in `~/.config/arche-defender/abusech.key` (`chmod 600`) or `$ABUSECH_AUTH_KEY`.
 Your own indicators (IPs, CIDRs, domains, hashes, one per line) go in `~/.config/arche-defender/iocs.txt`.
