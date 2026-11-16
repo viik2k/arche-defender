@@ -139,3 +139,42 @@ def snap_changes(out, cut):
         try: t = datetime.fromisoformat(f[2].replace('Z', '+00:00')).timestamp()
         except ValueError: continue
         if t >= cut: yield item(f'Snap {"installed" if m[1] == "Install" else "removed"} {m[2]}' + (' from a file, without a store signature' if m[3] else ''))
+
+
+# Keystroke injection: a Rubber Ducky-style gadget enumerates as a keyboard, types a payload in seconds and is pulled out.
+USB_NEW = re.compile(r'^usb (\S+): New USB device found, idVendor=(\w{4}), idProduct=(\w{4})')
+USB_NAME = re.compile(r'^usb (\S+): Product: (.+)')
+USB_GONE = re.compile(r'^usb (\S+): USB disconnect')
+HID_KB = re.compile(r'^\S+ 0003:(\w{4}):(\w{4})\.\w+: .*USB HID v[\d.]+ Keyboard \[')
+BRIEF = 120   # seconds
+
+
+def kernel_usb(days=DAYS):
+    """(epoch seconds, boot id, message) for the kernel's USB plug, unplug and HID lines."""
+    out = sh('journalctl', '-q', '--no-pager', '--since', f'-{days}d', '-o', 'json', '_TRANSPORT=kernel',
+             '-g', 'New USB device found|USB disconnect|Product: |USB HID v', timeout=60)
+    for l in out.splitlines():
+        try: e = json.loads(l)
+        except ValueError: continue
+        if isinstance(m := e.get('MESSAGE'), str): yield int(e.get('__REALTIME_TIMESTAMP', 0)) / 1e6, e.get('_BOOT_ID', ''), m
+
+
+def brief_keyboards(events, attached=()):
+    """(vid:pid, product, seconds plugged in, when) for keyboards unplugged within BRIEF seconds; devices attached now are yours."""
+    up, kb = {}, set()
+    for t, boot, m in events:
+        if a := USB_NEW.match(m): up[boot, a[1]] = [t, f'{a[2]}:{a[3]}'.lower(), '']
+        elif (a := USB_NAME.match(m)) and (boot, a[1]) in up: up[boot, a[1]][2] = a[2].strip()
+        elif a := HID_KB.match(m): kb.add((boot, f'{a[1]}:{a[2]}'.lower()))
+        elif (a := USB_GONE.match(m)) and (s := up.pop((boot, a[1]), None)):
+            if (boot, s[1]) in kb and s[1] not in attached and t - s[0] < BRIEF: yield s[1], s[2], int(t - s[0]), s[0]
+
+
+@check('USB keystroke injection', 'Activity')
+def keystroke_injection():
+    """Keyboards plugged in for under two minutes this week and gone now: how keystroke-injection gadgets type a payload and leave."""
+    from .privacy import usb_devices
+    for ident, product, secs, t in brief_keyboards(kernel_usb(), {i for i, *_ in usb_devices()}):
+        yield warn(f'A USB keyboard{f" ({product})" if product else ""} [{ident}] was plugged in for {secs} seconds, {when(t)}',
+                   fix='Gadgets that pose as keyboards (Rubber Ducky-style sticks, "free" USB drives, rigged cables) type commands in seconds. '
+                       'If nobody you trust plugged it in, check Startup entries and shell history from that time, and do not reuse that device.')

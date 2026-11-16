@@ -100,3 +100,21 @@ class Snaps(unittest.TestCase):
         cut = datetime(2026, 11, 10, tzinfo=timezone.utc).timestamp()
         self.assertEqual([t for t, _, _ in logs.snap_changes(out, cut)],
                          ['Snap installed vlc', 'Snap installed tool from a file, without a store signature', 'Snap removed vlc'])
+
+
+class BriefKeyboards(unittest.TestCase):
+    def test_brief(self):
+        ev = [(100, 'b1', 'usb 1-4: New USB device found, idVendor=03eb, idProduct=2401, bcdDevice= 1.00'),
+              (100.1, 'b1', 'usb 1-4: Product: Keyboard'),
+              (100.3, 'b1', 'hid-generic 0003:03EB:2401.0007: input,hidraw6: USB HID v1.11 Keyboard [Keyboard] on usb-0000:00:14.0-4/input0'),
+              (110, 'b1', 'usb 5-2.1: New USB device found, idVendor=346e, idProduct=0005, bcdDevice= 1.00'),   # a racing wheel: not a keyboard
+              (130, 'b1', 'usb 5-2.1: USB disconnect, device number 6'),
+              (140, 'b1', 'usb 1-4: USB disconnect, device number 9'),
+              (200, 'b1', 'usb 1-5: New USB device found, idVendor=046d, idProduct=c339, bcdDevice=13.02'),
+              (200.2, 'b1', 'logitech 0003:046D:C339.0008: input,hidraw7: USB HID v1.11 Keyboard [Logitech Pro] on usb-0000:00:14.0-5/input0'),
+              (900, 'b1', 'usb 1-5: USB disconnect, device number 10'),   # plugged in for 700 s
+              (1000, 'b2', 'usb 1-6: New USB device found, idVendor=046d, idProduct=c339, bcdDevice=13.02'),
+              (1000.2, 'b2', 'hid-generic 0003:046D:C339.0001: input,hidraw1: USB HID v1.11 Keyboard [Logitech Pro] on usb-0000:00:14.0-6/input0'),
+              (1010, 'b2', 'usb 1-6: USB disconnect, device number 2')]
+        self.assertEqual(list(logs.brief_keyboards(ev)), [('03eb:2401', 'Keyboard', 40, 100), ('046d:c339', '', 10, 1000)])
+        self.assertEqual(list(logs.brief_keyboards(ev, {'046d:c339'})), [('03eb:2401', 'Keyboard', 40, 100)])   # attached now: yours
