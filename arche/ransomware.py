@@ -1,10 +1,12 @@
 # Ransomware tripwire: decoy files the user opts into (canary-install), checked on every scan and by the background
 # monitor. Ransomware encrypts or renames everything it reaches, so a changed or renamed decoy is an early alarm.
 # Ransom notes are spotted by malware.py's file sweep. 'Backups' checks there is a copy to restore from.
-import hashlib, json, os, re, time
+import hashlib, json, math, os, re, time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from .core import check, action, alert, warn, item, sh, have, text, files, jsonf, write_private, STATE, HOME
+from .malware import walk
 
 DB = STATE / 'canaries.json'
 NAME = 'Tax return 2025 (Arche Defender tripwire - do not open or delete).pdf'
@@ -56,6 +58,46 @@ def tripwire():
                         fix='Something rewrote a file nobody should touch. Disconnect from the network, shut down, and restore from an offline backup; do not pay.')
         elif changed is None:
             yield warn(f'Ransomware tripwire is missing: {p}', fix='If you deleted it, run canary-install again; if not, check other files in that folder.')
+
+
+# Encrypted files: ransomware that misses the decoys still leaves files whose name promises a format their bytes no longer have.
+DATA_EXT = {'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods', 'odp', 'rtf', 'epub', 'zip', '7z', 'rar', 'gz', 'jpg', 'jpeg',
+            'png', 'gif', 'webp', 'tif', 'tiff', 'heic', 'mp3', 'm4a', 'flac', 'ogg', 'wav', 'mp4', 'mov', 'mkv', 'webm', 'avi'}
+MAGIC = (b'PK\x03\x04', b'PK\x05\x06', b'\xd0\xcf\x11\xe0', b'\xff\xd8\xff', b'\x89PNG', b'GIF8', b'RIFF', b'\x1aE\xdf\xa3', b'fLaC',
+         b'OggS', b'7z\xbc\xaf', b'\x1f\x8b', b'Rar!', b'ID3', b'{\\rtf', b'II*\0', b'MM\0*')
+USER_DIRS = ('Documents', 'Pictures', 'Desktop', 'Music', 'Videos', 'Downloads')
+
+
+def ciphertext(h):
+    """No known file signature, and bytes as even as random data (compressed formats all start with a signature)."""
+    if h.startswith(MAGIC) or h[4:8] == b'ftyp' or b'%PDF' in h[:1024] or (h[:1] == b'\xff' and h[1] & 0xe0 == 0xe0): return False
+    return -sum(c / len(h) * math.log2(c / len(h)) for c in Counter(h).values()) > 7.6
+
+
+def encrypted(roots, since):
+    """(path, extension added by a rename or '') for files changed since `since` that look encrypted."""
+    for p, st in walk(roots, 6):
+        parts = os.path.basename(p).lower().split('.')
+        ext, added = (parts[-1], '') if parts[-1] in DATA_EXT else (parts[-2], parts[-1]) if len(parts) > 2 and parts[-2] in DATA_EXT else ('', '')
+        if not ext or st.st_mtime < since or st.st_size < 1024: continue
+        try:
+            with open(p, 'rb') as f: h = f.read(4096)
+        except OSError: continue
+        if ciphertext(h): yield p, added
+
+
+@check('Encrypted files', 'Threats')
+def encrypted_files():
+    """Documents, photos and media changed in the last week that no longer look like what their names say."""
+    found = list(encrypted([f'{HOME}/{d}' for d in USER_DIRS], time.time() - 7 * 86400))
+    if not found: return
+    added = Counter(a for _, a in found if a).most_common(1)
+    yield (alert if len(found) >= 3 else warn)(
+        (f'{len(found)} files changed this week no longer look like what their names say' if len(found) > 1 else
+         '1 file changed this week no longer looks like what its name says') + ', as if encrypted'
+        + (f' (renamed to *.{added[0][0]})' if added else '') + ': ' + ', '.join(p.replace(HOME, '~') for p, _ in found[:3]),
+        fix='If they no longer open: disconnect from the network, shut down, and restore from an offline backup. Do not pay; '
+            'look for a free decryptor at nomoreransom.org first. A single damaged download can also look like this.')
 
 
 STALE = 14   # days

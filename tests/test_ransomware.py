@@ -36,6 +36,24 @@ if __name__ == '__main__':
     unittest.main()
 
 
+class Encrypted(unittest.TestCase):
+    def test_files(self):
+        with tempfile.TemporaryDirectory() as d:
+            rand = os.urandom(8192)
+            for name, data in (('photo.jpg', b'\xff\xd8\xff\xe0' + rand), ('report.docx', b'PK\x03\x04' + rand), ('a.pdf', b'%PDF-1.7' + rand),
+                               ('song.mp3', b'\xff\xfb\x90' + rand), ('notes.txt', rand), ('tiny.png', rand[:500]), ('text.pdf', b'hello ' * 2000),
+                               ('cv.docx', rand), ('img.png.akira', rand), ('old.xlsx', rand)):
+                Path(d, name).write_bytes(data)
+            os.utime(Path(d, 'old.xlsx'), (0, 0))
+            self.assertEqual(sorted((os.path.basename(p), a) for p, a in ransomware.encrypted([d], 1000)), [('cv.docx', ''), ('img.png.akira', 'akira')])
+        h = ransomware.HOME
+        for found, sev, text in (([(f'{h}/Documents/cv.docx', '')], WARN, '1 file changed this week no longer looks like what its name says, as if encrypted: ~/Documents/cv.docx'),
+                                 ([(f'{h}/a.jpg.x', 'x'), (f'{h}/b.jpg.x', 'x'), (f'{h}/c.pdf', ''), (f'{h}/d.jpg.x', 'x')], ALERT,
+                                  '4 files changed this week no longer look like what their names say, as if encrypted (renamed to *.x): ~/a.jpg.x, ~/b.jpg.x, ~/c.pdf')):
+            with mock.patch.object(ransomware, 'encrypted', lambda *a: iter(found)):
+                self.assertEqual([(s, t) for t, s, _ in ransomware.encrypted_files()], [(sev, text)])
+
+
 class Backups(unittest.TestCase):
     def rows(self, found):
         return [(r[1], r[0]) for r in ransomware.backup_rows(found, now=100 * 86400)]
