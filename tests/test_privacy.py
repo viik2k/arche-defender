@@ -110,6 +110,23 @@ class Clipboard(unittest.TestCase):
         self.assertEqual(privacy.clip_entries(str(p)), ['a', 'b'])
 
 
+class Crashes(unittest.TestCase):
+    def test_rows(self):
+        env = 'HOME=/home/u\nSSH_AUTH_SOCK=/run/user/1000/ssh-agent\nGITHUB_TOKEN=ghp_' + 'aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF2hJ5' + \
+              '\nDB_PASSWORD=$PGPASS\nSTARSHIP_SESSION_KEY=4815162342\nOPENAI_API_KEY=sk-proj-' + 'Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe' + '\n'
+        entries = [{'COREDUMP_UID': '1000', 'COREDUMP_EXE': '/usr/bin/python3', 'COREDUMP_ENVIRON': list(env.encode())},
+                   {'COREDUMP_UID': '1000', 'COREDUMP_EXE': '/usr/lib/brave/brave', 'COREDUMP_FILENAME': '/var/lib/systemd/coredump/core.brave.1000.x.42.1.zst'},
+                   {'COREDUMP_UID': '1000', 'COREDUMP_EXE': '/usr/bin/kate', 'COREDUMP_FILENAME': '/var/lib/systemd/coredump/core.kate.1000.x.43.1.zst'},
+                   {'COREDUMP_UID': '0', 'COREDUMP_EXE': '/usr/bin/sudo', 'COREDUMP_ENVIRON': 'API_TOKEN=abcdefgh12345678'}]
+        r = [(t, s, f) for t, s, f in privacy.crash_rows(entries, 1000, exists=lambda f: True)]
+        self.assertEqual([t for t, _, _ in r], [
+            'The system journal kept the environment of a crashed python3, with 2 secrets: GITHUB_TOKEN, OPENAI_API_KEY',
+            'A memory dump of brave from a crash is on disk, where programs running as you can read it (it can hold passwords and sign-in cookies)'])
+        self.assertEqual(r[1][2], 'Delete it: sudo rm /var/lib/systemd/coredump/core.brave.1000.x.42.1.zst')
+        self.assertTrue(all(s == WARN for _, s, _ in r))
+        self.assertEqual(list(privacy.crash_rows(entries[1:2], 1000, exists=lambda f: False)), [])   # cleaned up already
+
+
 if __name__ == '__main__':
     unittest.main()
 

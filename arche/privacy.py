@@ -250,6 +250,48 @@ def clipboard():
                            'those secrets. Password managers that mark copies as secret (KeePassXC) are left out of the history.')
 
 
+# systemd-coredump logs a crashed program's environment to the journal and keeps its memory under /var/lib/systemd/coredump,
+# both readable by the program's owner, so by anything else running as you. ponytail: Ubuntu's apport (/var/crash) is not read.
+COREDUMP_ID = 'fc2e22bc6ee647b6b90729ab34a250b1'
+SECRET_APPS = re.compile(r'^(brave|chrome|chromium|google-chrome|firefox|librewolf|floorp|zen|vivaldi|opera|msedge|thunderbird|keepassxc|'
+                         r'bitwarden|1password|enpass|proton-pass|ssh-agent|gpg-agent|gnome-keyring|kwalletd|ksecretd|discord|vesktop|'
+                         r'signal-desktop|telegram|element|slack|steam|electrum|exodus|ledger)', re.I)
+
+
+def jfield(v): return bytes(v).decode('utf-8', 'replace') if isinstance(v, list) else v or ''   # journald sends binary text as bytes
+
+
+def crash_rows(entries, uid, exists=os.path.exists):
+    env, cores = {}, {}
+    for e in entries:
+        if str(e.get('COREDUMP_UID')) != str(uid): continue
+        exe = os.path.basename(jfield(e.get('COREDUMP_EXE'))) or '?'
+        for l in jfield(e.get('COREDUMP_ENVIRON')).splitlines():
+            if any(rx.search(l) for _, rx in HIST_SECRETS) or secret_kinds(l): env.setdefault(exe, set()).add(l.split('=', 1)[0])
+        if SECRET_APPS.match(exe) and exists(f := jfield(e.get('COREDUMP_FILENAME'))): cores.setdefault(exe, []).append(f)
+    for exe, names in env.items():
+        yield warn(f'The system journal kept the environment of a crashed {exe}, with {len(names)} secret{"s" if len(names) > 1 else ""}: {", ".join(sorted(names))}',
+                   fix='Anything running as you can read it there for as long as the journal keeps logs, so change those secrets. To stop '
+                       'crashes recording memory and environment: echo "kernel.core_pattern=|/bin/false" | sudo tee '
+                       '/etc/sysctl.d/50-coredump.conf && sudo sysctl --system')
+    for exe, fs in cores.items():
+        yield warn(f'A memory dump of {exe} from a crash is on disk, where programs running as you can read it '
+                   f'(it can hold passwords and sign-in cookies)', fix='Delete it: sudo rm ' + ' '.join(fs))
+
+
+@check('Crash dumps', 'Privacy')
+def crashes():
+    """Secrets in the environment of crashed programs, which the journal keeps, and memory dumps of browsers, password managers
+    and chat apps left on disk."""
+    out = sh('journalctl', '-q', '--all', '--no-pager', f'MESSAGE_ID={COREDUMP_ID}', '-o', 'json',
+             '--output-fields=COREDUMP_EXE,COREDUMP_UID,COREDUMP_ENVIRON,COREDUMP_FILENAME', timeout=60)
+    entries = []
+    for l in out.splitlines():
+        try: entries.append(json.loads(l))
+        except ValueError: pass
+    yield from crash_rows(entries, os.getuid())
+
+
 SENSITIVE_EXT = {'.txt', '.csv', '.md', '.json', '.rtf', '.text', '.note', '.pem', '.key', ''}
 CARD = re.compile(r'(?<![\d.-])(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))(?:[ -]?\d{4}){2}[ -]?\d{1,7}(?![\d.-])')
 CARD_WORDS = re.compile(r'\b(card|visa|mastercard|amex|cvv|cvc|expir)', re.I)
