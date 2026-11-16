@@ -16,7 +16,9 @@ WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'), 'Star
          'Command hooks': ('%h/.local/share/dbus-1/services', '%h/.local/share/applications', '%h/.local/share/kio/servicemenus'),
          'Desktop add-ons': ('%h/.local/share/plasma/plasmoids', '%h/.local/share/kwin/scripts', '%h/.local/share/gnome-shell/extensions'),
          # not ~/.claude itself: Claude Code writes its history there on every prompt
-         'AI plugins, skills and hooks': ('%h/.claude/skills', '%h/.claude/plugins', '%h/.codex/skills', '%h/.gemini/extensions', '%h/.agents/skills')}
+         'AI plugins, skills and hooks': ('%h/.claude/skills', '%h/.claude/plugins', '%h/.codex/skills', '%h/.gemini/extensions', '%h/.agents/skills'),
+         # a ClickFix paste, found when the shell saves its history (at exit, or after each command with history -a); the check takes 0.3 s
+         'Risky commands in shell history': ('%h/.bash_history', '%h/.zsh_history', '%h/.local/share/fish/fish_history')}
 ALSO = {'Ransomware tripwire': ('Encrypted files',), 'AI plugins, skills and hooks': ('AI skill and plugin contents',)}   # same trigger: encryption that misses the decoys still alarms; a new skill gets its content scan
 URGENT = {'Ransomware tripwire'}   # runs at once and at normal priority: encryption saturates the disk, idle I/O would starve it
 

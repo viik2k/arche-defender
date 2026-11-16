@@ -71,7 +71,7 @@ Without root it cannot see other users' processes, `/root`, sudoers or the sshd 
 It runs at the lowest CPU and disk priority and sends a desktop notification only for findings it has not told you
 about yet. Folder watches (systemd `.path` units) also re-run just the matching check within seconds of a change:
 Downloads, Desktop and `~/.local/bin` (dropped files), autostart, user services, D-Bus services and launchers (persistence),
-Plasma widgets, KWin scripts and GNOME Shell extensions (desktop add-ons), the skill and plugin folders of Claude Code, Codex and Gemini CLI (scanned at once), and Documents and Pictures (the ransomware tripwire and Encrypted files, which run at normal priority so a busy disk cannot delay it). No
+Plasma widgets, KWin scripts and GNOME Shell extensions (desktop add-ons), the skill and plugin folders of Claude Code, Codex and Gemini CLI (scanned at once), shell history (a pasted ClickFix command), and Documents and Pictures (the ransomware tripwire and Encrypted files, which run at normal priority so a busy disk cannot delay it). No
 daemon runs in between. The hourly pass also refreshes the threat-intel feeds once a day, the way antivirus updates its
 definitions (offline, it keeps the last ones). Once you have run `deps-update` yourself, the weekly full pass repeats it.
 
