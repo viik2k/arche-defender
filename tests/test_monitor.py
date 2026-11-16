@@ -14,5 +14,17 @@ def test_fresh():
     assert fresh_findings(res, set(flagged))[1] == []
 
 
+def test_watch_run_keeps_other_notices():   # a folder-watch pass must not forget what the hourly scan already announced
+    import json, tempfile
+    from pathlib import Path
+    from arche import monitor, core
+    core.load_all()
+    monitor.SEEN, monitor.have = Path(tempfile.mkdtemp()) / 'n.json', lambda c: False   # no real notifications
+    monitor.SEEN.write_text(json.dumps({'told': ['Other: x', 'Dropped files: gone'], 'last': 't'}))
+    monitor.run(['Dropped files'])
+    s = json.loads(monitor.SEEN.read_text())
+    assert 'Other: x' in s['told'] and 'Dropped files: gone' not in s['told'] and s['last'] == 't'
+
+
 if __name__ == '__main__':
-    test_fresh(); print('ok')
+    test_fresh(); test_watch_run_keeps_other_notices(); print('ok')

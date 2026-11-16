@@ -63,13 +63,15 @@ Without root it cannot see other users' processes, `/root`, sudoers or the sshd 
 ## Background monitor
 
 ```sh
-./arche-defender.py install-monitor     # systemd user timer: quick scan hourly, full scan weekly
+./arche-defender.py install-monitor     # systemd user units: quick scan hourly, full scan weekly, plus a folder watch
 ./arche-defender.py monitor-status
 ./arche-defender.py uninstall-monitor
 ```
 
 It runs at the lowest CPU and disk priority and sends a desktop notification only for findings it has not told you
-about yet.
+about yet. A systemd `.path` unit also watches Downloads, Desktop, `~/.local/bin`, `~/.config/autostart` and your user
+services, and re-runs just the matching checks a few seconds after anything changes there: a malicious download or a new
+autostart entry is reported within seconds, with no daemon running in between.
 
 ## Actions
 

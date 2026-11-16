@@ -78,7 +78,7 @@ def main(argv=None):
     p.add_argument('--scan', action='store_true', help='scan headless; exit 2 on alerts, 1 on warnings or new items, else 0')
     p.add_argument('--full', action='store_true', help='with --scan: include the slow checks (malware and integrity scans)')
     p.add_argument('--json', action='store_true', help='with --scan: print JSON')
-    p.add_argument('--only', action='append', metavar='CHECK', help='with --scan: run just this check (repeatable)')
+    p.add_argument('--only', action='append', metavar='CHECK', help='with --scan or --monitor: run just this check (repeatable)')
     p.add_argument('--accept', action='store_true', help='with --scan: save the results as the new baseline')
     p.add_argument('--monitor', action='store_true', help='one background pass: scan and notify about new findings (the timer runs this)')
     args = p.parse_args(argv)
@@ -92,7 +92,7 @@ def main(argv=None):
     if args.scan: return scan(args)
     if args.monitor:
         from .monitor import run
-        return run()
+        return run(args.only)
     from .gui import gui
     gui()
     return 0
