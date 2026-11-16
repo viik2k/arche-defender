@@ -260,6 +260,7 @@ AI_BASE = re.compile(r'^\s*(?:export\s+|set\s+-\w*x\w*\s+)?((?:ANTHROPIC|OPENAI|
                      r'(?:API_)?BASE(?:_URL)?)\s*[=\s]\s*["\']?([^"\'\s]+)')
 AI_HOSTS = re.compile(r'^https://([\w-]+\.)*(anthropic\.com|openai\.com|openai\.azure\.com|googleapis\.com|amazonaws\.com|openrouter\.ai|'
                       r'deepseek\.com|mistral\.ai|groq\.com|x\.ai)(:\d+)?(/|$)|^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)')
+CLOUD = re.compile(r'^https://([\w-]+\.)*(anthropic\.com|amazonaws\.com|googleapis\.com)(:\d+)?(/|$)')
 
 
 @check('AI agent permissions', FAM)
@@ -352,7 +353,7 @@ def claude_settings(s, where):
     env = s.get('env') if isinstance(s.get('env'), dict) else {}
     for k in ('ANTHROPIC_BASE_URL', 'ANTHROPIC_BEDROCK_BASE_URL', 'ANTHROPIC_VERTEX_BASE_URL', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'):
         base = str(env.get(k) or '')   # a cloned repo's settings can send your key to its author before you trust it (CVE-2026-21852)
-        if base and not re.match(r'^https://([\w-]+\.)*(anthropic\.com|amazonaws\.com|googleapis\.com)(:\d+)?(/|$)', base):
+        if base and not (AI_HOSTS if k.endswith('BASE_URL') else CLOUD).match(base):   # a local router (LiteLLM) is fine, a local proxy is not
             yield warn(f'Claude Code traffic goes through {redact(base)} ({k}, {where}): that host sees every prompt and key',
                        f'Remove {k} unless you run that proxy yourself')
     if str(env.get('NODE_TLS_REJECT_UNAUTHORIZED', '')).strip() == '0':
