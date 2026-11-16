@@ -31,15 +31,15 @@ def test_watch_run_keeps_other_notices():   # a folder-watch pass must not forge
 def test_hourly_run_refreshes_intel():
     import atexit, shutil, tempfile
     from pathlib import Path
-    from arche import monitor, intel, cli
+    from arche import monitor, intel, cli, deps
     d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
-    calls, real = [], (intel.feed_age_days, intel.update, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have)
-    intel.update, cli.pick, cli.scan_all = lambda: calls.append(1) or 'Updated 3 feeds', lambda *a: [], lambda *a: {}
+    calls, real = [], (intel.feed_age_days, intel.update, deps.DB, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have)
+    intel.update, deps.DB, cli.pick, cli.scan_all = lambda: calls.append(1) or 'Updated 3 feeds', Path(d) / 'deps.json', lambda *a: [], lambda *a: {}
     monitor.record, monitor.SEEN, monitor.have = lambda *a: None, Path(d) / 'n.json', lambda c: False
-    try:
+    try:   # deps.DB points at an empty folder: a real deps.json would send this PC's package names to osv.dev
         for age in (None, 3, 0): intel.feed_age_days = lambda: age; monitor.run()
         monitor.run(['Dropped files'])   # a folder-watch pass never goes online
-    finally: intel.feed_age_days, intel.update, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have = real
+    finally: intel.feed_age_days, intel.update, deps.DB, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have = real
     assert calls == [1, 1], calls
 
 
