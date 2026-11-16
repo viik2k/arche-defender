@@ -569,5 +569,19 @@ def test_lan_http_mcp():
     assert sev({'url': 'http://127.0.0.1/mcp', 'headers': {'Authorization': 'x'}}) == [] and sev({'url': 'https://10.0.0.2/mcp', 'headers': {'X-Api-Key': 'x'}}) == []
 
 
+def test_more_mcp_paths():
+    from arche import core
+    core.load_all()
+    h, old = tmp(), os.environ['HOME']
+    for d, f, name in (('.config/Cursor/User/globalStorage/kilocode.kilo-code/settings', 'mcp_settings.json', 'kilo-x'),
+                       ('.config/anythingllm-desktop/storage/plugins', 'anythingllm_mcp_servers.json', 'allm-x')):
+        os.makedirs(f'{h}/{d}'); json.dump({'mcpServers': {name: {'command': 'node', 'args': ['s.js']}}}, open(f'{h}/{d}/{f}', 'w'))
+    try:
+        os.environ['HOME'] = h
+        t = ' '.join(r[0] for r in core.CHECKS['MCP servers'].fn())
+    finally: os.environ['HOME'] = old
+    assert 'MCP server kilo-x' in t and 'MCP server allm-x' in t, t
+
+
 if __name__ == '__main__':
-    test_lan_http_mcp(); test_vet_repo(); test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_more_mcp_paths(); test_lan_http_mcp(); test_vet_repo(); test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

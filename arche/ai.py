@@ -80,8 +80,10 @@ EDITOR_SETTINGS = ('~/.config/Code/User/settings.json', '~/.config/Code - Inside
 # Every config file an agent or editor keeps MCP servers in (JSON; Codex is TOML and handled apart).
 MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~/.cursor/mcp.json', '~/.codeium/windsurf/mcp_config.json',
              '~/.gemini/settings.json', '~/.config/Code/User/mcp.json', '~/.config/Code/User/settings.json', '~/.config/Cursor/User/settings.json',
-             '~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
-             '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json', '~/.continue/config.json',
+             # Cline, Roo Code and Kilo Code keep theirs in the extension's storage, in whichever editor (Code, Cursor, Windsurf, VSCodium, Flatpak)
+             '~/.config/*/User/globalStorage/*/settings/*mcp_settings.json', '~/.var/app/*/config/*/User/globalStorage/*/settings/*mcp_settings.json',
+             '~/.config/anythingllm-desktop/storage/plugins/anythingllm_mcp_servers.json', '~/.config/Jan/data/mcp_config.json',
+             '~/.local/share/Jan/data/mcp_config.json', '~/.continue/config.json',
              '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json', '~/.copilot/mcp-config.json', '~/.qwen/settings.json',
              '~/.config/zed/settings.json', '~/.gemini/extensions/*/gemini-extension.json', '~/.config/Code/User/profiles/*/mcp.json',
              '~/.config/Code - Insiders/User/mcp.json', '~/.config/VSCodium/User/mcp.json', '~/.config/Cursor/User/mcp.json')
@@ -94,7 +96,8 @@ CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
 SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.agents/skills', '~/.codex/skills', '~/.codex/prompts',
               '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules',
               '~/.openclaw/skills', '~/.openclaw/workspace/skills',   # ClawHub skills: hundreds shipped stealers in 2026
-              '~/.copilot/skills', '~/.copilot/agents', '~/.qwen/commands', '~/.qwen/agents')
+              '~/.copilot/skills', '~/.copilot/agents', '~/.qwen/commands', '~/.qwen/agents',
+              '~/.config/anythingllm-desktop/storage/plugins/agent-skills')   # AnythingLLM custom skills: Node code its agent runs with your rights
 COPILOT_PLUGINS = '~/.copilot/installed-plugins'   # GitHub Copilot CLI plugins: skills, agents, hooks and MCP servers, as Claude Code's
 OPENCLAW = ('~/.openclaw/openclaw.json', '~/.clawdbot/clawdbot.json', '~/.moltbot/moltbot.json', '~/.openclaw/exec-approvals.json')
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.clinerules/*', '.roorules',
