@@ -215,6 +215,24 @@ def copilot_plugins():
     pats = (f'{COPILOT_PLUGINS}/{d}{p}/plugin.json' for d in ('*', '*/*') for p in ('', '/.claude-plugin', '/.github/plugin'))
     return sorted({re.sub(r'/(\.claude-plugin|\.github/plugin)$', '', os.path.dirname(m)) for m in files(*pats)})
 
+def plugin_manifests():
+    """(dir, name, manifest) per cached Claude Code plugin: its plugin.json over its marketplace entry, which can declare the same parts."""
+    for d in files('~/.claude/plugins/cache/*/*/*'):
+        if '/temp_git_' in d or not os.path.isdir(d): continue
+        market, name = Path(d).parts[-3:-1]
+        mk = jsonf(f'{HOME}/.claude/plugins/marketplaces/{market}/.claude-plugin/marketplace.json')
+        entry = next((e for e in (mk.get('plugins') if isinstance(mk, dict) else None) or [] if isinstance(e, dict) and e.get('name') == name), {})
+        man = jsonf(f'{d}/.claude-plugin/plugin.json')
+        yield d, name, {**entry, **(man if isinstance(man, dict) else {})}
+
+
+def declared(d, v):
+    """A manifest part given inline (a dict) or as paths to JSON files in the plugin, as (file or None, dict) pairs."""
+    if isinstance(v, dict): return [(None, v)]
+    paths = [p for p in ([v] if isinstance(v, str) else v if isinstance(v, list) else []) if isinstance(p, str)]
+    return [(f, jsonf(f)) for f in (os.path.normpath(os.path.join(d, p)) for p in paths)]
+
+
 @check('AI plugins, skills and hooks', FAM)
 def plugins():
     st = jsonf(f'{HOME}/.claude/settings.json')
@@ -229,12 +247,23 @@ def plugins():
             nm = re.search(r'^name:\s*(.+)$', text(sk), re.M)
             whole = sk.endswith(('/SKILL.md', '/gemini-extension.json')) and os.path.dirname(sk) != os.path.expanduser(root)
             yield item(f'Skill/command {nm[1].strip() if nm else Path(sk).parent.name} ({tilde(sk)}), code {fingerprint(os.path.dirname(sk) if whole else sk)}')
-    for f in files('~/.claude/settings.json', '~/.claude/settings.local.json', '/etc/claude-code/managed-settings.json',
-                   '~/.claude/plugins/cache/*/*/*/hooks/hooks.json', '~/.claude/plugins/cache/*/*/*/hooks.json', *HOOK_FILES):
-        where = re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', tilde(f))
-        for ev, cmd in hook_cmds(jsonc(f)):
+    # plugin.json or the marketplace entry can point hooks elsewhere or give them inline; LSP servers are programs Claude Code starts
+    man_hooks, lsp = [], []
+    for d, name, man in plugin_manifests():
+        man_hooks += [(f, h if f or 'hooks' in h else {'hooks': h}, f'plugin {name}') for f, h in declared(d, man.get('hooks'))]
+        for _, conf in declared(d, man.get('lspServers')) + declared(d, '.lsp.json'):
+            lsp += [(name, k, v) for k, v in conf.items() if isinstance(v, dict) and v.get('command')]
+    std = files('~/.claude/settings.json', '~/.claude/settings.local.json', '/etc/claude-code/managed-settings.json',
+                '~/.claude/plugins/cache/*/*/*/hooks/hooks.json', '~/.claude/plugins/cache/*/*/*/hooks.json', *HOOK_FILES)
+    for f, conf, where in [(f, jsonc(f), re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', tilde(f))) for f in std] + \
+            [x for x in man_hooks if x[0] not in std]:
+        for ev, cmd in hook_cmds(conf):
             yield item(ver(f'Hook {ev} ({where}): {redact(cmd)[:160]}'))
             yield from scan_text(cmd, f'Hook {ev} ({where})')
+    for name, k, v in lsp:
+        cmd = ' '.join(str(x) for x in [v['command'], *(v.get('args') if isinstance(v.get('args'), list) else [])])
+        yield item(ver(f'LSP server {k} (plugin {name}): {redact(cmd)[:160]}'))
+        yield from scan_text(cmd, f'LSP server {k} (plugin {name})')
     for d in copilot_plugins(): yield item(f'Copilot CLI plugin {os.path.basename(d)} ({tilde(d)}), code {fingerprint(d)}')
     codex = text(f'{HOME}/.codex/config.toml')
     if m := re.search(r'^notify\s*=\s*(.+)$', codex, re.M): yield item(f'Codex notify hook: {redact(m[1])[:160]}')
@@ -441,6 +470,8 @@ def mcp_servers():
     srcs += [(re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', f), {'mcpServers': jsonf(f).get('mcpServers', jsonf(f))})
              for f in files('~/.claude/plugins/cache/*/*/*/.mcp.json')]
     srcs += [(f'Copilot CLI plugin {os.path.basename(d)}', jsonf(f'{d}/.mcp.json')) for d in copilot_plugins()]
+    srcs += [(f'plugin {name}', {'mcpServers': c}) for d, name, man in plugin_manifests() for f, c in declared(d, man.get('mcpServers'))
+             if not (f or '').endswith('/.mcp.json')]   # inline, or a file other than the .mcp.json read above
     for where, conf in srcs:
         for path, name, s in servers(conf):
             yield tilde(where + (f' > {path[-1]}' if path and path[-1] not in ('mcp',) and where.endswith('.claude.json') else '')), name, s
