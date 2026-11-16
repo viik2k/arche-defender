@@ -175,5 +175,16 @@ def test_chat_secrets():
     assert 'GitHub token' in rows[1][0] and rows[1][2].endswith('; tip'), rows
 
 
+
+def test_rc_approvals_off():
+    from arche import ai, persistence
+    d = tmp(); rc = os.path.join(d, '.bashrc')
+    open(rc, 'w').write("alias c='claude --dangerously-skip-permissions'\n# alias g='gemini --yolo'\nalias x='codex --full-auto'\n")
+    real, persistence.RC_FILES = persistence.RC_FILES, (rc,)
+    try: rows = [t for t, s, _ in ai.permissions() if d in t]
+    finally: persistence.RC_FILES = real
+    assert len(rows) == 1 and 'dangerously-skip' in rows[0], rows
+
+
 if __name__ == '__main__':
-    test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

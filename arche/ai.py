@@ -199,6 +199,10 @@ def contents():
     for f in files(*MEMORY_FILES): yield from scan_text(text(f), f'agent memory {tilde(f)}')
 
 
+APPROVALS_OFF = re.compile(r'--dangerously-skip-permissions|--permission-mode[= ]+["\']?bypassPermissions|'
+                          r'--dangerously-bypass-approvals-and-sandbox|--yolo\b|--allow-all-tools|--trust-all-tools')
+
+
 @check('AI agent permissions', FAM)
 def permissions():
     for f in files('~/.claude/settings.json', '~/.claude/settings.local.json', '/etc/claude-code/managed-settings.json'):
@@ -210,6 +214,12 @@ def permissions():
         yield warn('Codex sandbox is off (sandbox_mode = "danger-full-access")', 'Use "workspace-write" in ~/.codex/config.toml')
     if re.search(r'"(yolo|autoAccept)"\s*:\s*true', text(f'{HOME}/.gemini/settings.json')):
         yield warn('Gemini CLI auto-accepts tool calls', 'Turn off autoAccept/yolo in ~/.gemini/settings.json')
+    from .persistence import RC_FILES
+    for f in files(*RC_FILES, '~/.config/fish/functions/*.fish', '~/.bash_aliases', '~/.zsh_aliases'):
+        for l in text(f).splitlines():   # alias claude='claude --dangerously-skip-permissions': every session runs unguarded
+            if APPROVALS_OFF.search(l) and not l.lstrip().startswith('#'):
+                yield warn(f'{tilde(f)} starts an AI agent with approvals off: {redact(l.strip())[:120]}',
+                           'Remove the flag; keep it for throwaway containers, where a bad command cannot reach your files')
     for f in files(*EDITOR_SETTINGS):
         s = jsonc(f)
         if s.get('chat.tools.autoApprove') is True or s.get('chat.tools.global.autoApprove') is True:
