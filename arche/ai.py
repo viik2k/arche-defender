@@ -227,6 +227,8 @@ def contents():
     for root in SKILL_DIRS:
         if os.path.isdir(os.path.expanduser(root)): yield from scan_tree(os.path.expanduser(root), 'skill')
     for d in files(f'{CLAUDE_EXT}/*'): yield from scan_tree(d, 'Claude Desktop extension')
+    yield from preapproval_warns(files(*(f'{r}/{g}' for r in SKILL_DIRS for g in ('*/SKILL.md', 'SKILL.md', '*.md')),
+                                       *(f'~/.claude/plugins/cache/*/*/*/{g}' for g in ('skills/*/SKILL.md', 'commands/*.md', 'agents/*.md'))))
     # Agent memory and global instructions load into every session: an injection an agent was tricked into saving stays there.
     for f in files(*MEMORY_FILES): yield from scan_text(text(f), f'agent memory {tilde(f)}')
 
@@ -281,12 +283,31 @@ def run_settings(s):
     return cmds + [(f'env {k}', str(v)) for k, v in env.items() if k in CODE_ENV]
 
 
+# Allow rules that amount to "run anything": a whole shell, or an interpreter or downloader that can run any code.
+WIDE_BASH = {'Bash', 'Bash(*)', 'Bash(*:*)', 'Bash(:*)', 'Bash(sudo:*)', 'Bash(curl:*)', 'Bash(wget:*)', 'Bash(sh:*)', 'Bash(bash:*)',
+             'Bash(python:*)', 'Bash(python3:*)', 'Bash(node:*)', 'Bash(npx:*)', 'Bash(eval:*)'}
+
+
+def preapproved(f):
+    """Wide shell rules in a skill, command or agent's allowed-tools: while it is active the agent runs them without asking."""
+    fm = re.match(r'---\r?\n(.*?)\n---', text(f), re.S)
+    m = fm and re.search(r'^allowed-tools:(.*(?:\n[ \t]+-.*)*)', fm[1], re.M)
+    return sorted({t.replace(' ', '') for t in re.findall(r'\bBash(?:\s*\([^)]*\))?', m[1])} & WIDE_BASH) if m else []
+
+
+def preapproval_warns(fs):
+    for f in fs:
+        if w := preapproved(f):
+            yield warn(f'{tilde(f)} pre-approves {", ".join(w)}: whatever it tells the agent to run happens without asking',
+                       'Remove allowed-tools from it, or narrow it to the exact commands it needs')
+
+
 def claude_settings(s, where):
     p = s.get('permissions') or {}
     if p.get('defaultMode') == 'bypassPermissions':
         yield warn(f'Claude Code skips all permission prompts by default ({where})', 'Remove "defaultMode": "bypassPermissions"')
     if s.get('skipDangerousModePermissionPrompt'): yield warn(f'Claude Code bypass-mode warning is turned off ({where})')
-    wide = [a for a in p.get('allow', []) if a in ('Bash', 'Bash(*)', 'Bash(*:*)', 'Bash(:*)', 'Bash(sudo:*)', 'Bash(curl:*)', 'Bash(sh:*)', 'Bash(bash:*)')]
+    wide = [a for a in p.get('allow', []) if a in WIDE_BASH]
     if wide: yield warn(f'Claude Code may run {", ".join(wide)} without asking ({where})', 'Allow specific commands instead of whole shells')
     if s.get('enableAllProjectMcpServers'):
         if where.endswith('settings.local.json') and '/.claude/' in where and not where.startswith('~/.claude/'):
@@ -529,6 +550,7 @@ def projects():
         for f in files(*(f'{r}/{x}' for x in INSTRUCTION_FILES), f'{r}/.cursor/rules/*', f'{r}/.claude/commands/*.md',
                        f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md'):
             yield from scan_text(text(f), tilde(f))
+        yield from preapproval_warns(files(f'{r}/.claude/commands/*.md', f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md'))
 
 
 SAFE_GLOBALS = re.compile(r'^(torch|collections|numpy|_codecs|copyreg|copy_reg|typing|pytorch_lightning|lightning|omegaconf|sklearn|'
