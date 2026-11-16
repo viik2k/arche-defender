@@ -77,6 +77,15 @@ Also in the window's **Tools** menu.
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
 
+### Threat-intel feeds
+
+`intel-update` fetches keyless feeds: Feodo Tracker, SSLBL, Emerging Threats compromised IPs, Spamhaus DROP (v4 and v6),
+signature-base C2 and hash IOCs, and HaGeZi's threat-intel domains. Matching happens offline against connections, file
+hashes and browsing history. To also get **URLhaus** (malicious URLs, matched by exact URL), **MalwareBazaar** (sample
+hashes from the last 48 hours) and **ThreatFox** (C2 IPs, domains, URLs and hashes), get a free Auth-Key at
+<https://auth.abuse.ch/> and save it in `~/.config/arche-defender/abusech.key` (`chmod 600`) or `$ABUSECH_AUTH_KEY`.
+Your own indicators (IPs, CIDRs, domains, hashes, one per line) go in `~/.config/arche-defender/iocs.txt`.
+
 ## Privacy of its own data
 
 The baseline, quarantine, intel cache and monitor state live in `~/.local/state/arche-defender/`, mode 700/600.
