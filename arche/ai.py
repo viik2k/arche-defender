@@ -19,6 +19,7 @@ FAM = 'AI agents'
 Q = r'(?<![\"\'\u201c\u2018`])'
 AI_RULES = [(n, s, re.compile(p, re.I), h) for n, s, p, h in (
     ('invisible Unicode tag characters (hidden instructions)', ALERT, r'[\U000E0000-\U000E007F]{3,}', None),
+    ('invisible code: a run of Unicode variation selectors (the GlassWorm trick)', ALERT, r'[\uFE00-\uFE0F\U000E0100-\U000E01EF]{8,}', None),
     ('bidirectional text override characters', WARN, r'[\u202A-\u202E\u2066-\u2069]', None),
     ('tells the agent to keep things from you', WARN,
      Q + r"\b((do not|don't|never)\s+(tell|inform|notify|alert|let)\s+the user\s+(know|about|that|what|you)\b|"
@@ -84,7 +85,7 @@ def scan_text(t, where):
     hits = [(n, s, m.group(0)[:80]) for n, s, rx, h in AI_RULES if (not h or any(x in low for x in h)) and (m := rx.search(t))]
     if _match: hits += _match(t)
     for n, s, snip in hits:
-        snip = redact(snip.encode('unicode_escape').decode() if re.search(r'[\U000E0000-\U000E007F‪-‮⁦-⁩]', snip) else snip)
+        snip = redact(snip.encode('unicode_escape').decode() if re.search(r'[\U000E0000-\U000E01EF\uFE00-\uFE0F‪-‮⁦-⁩]', snip) else snip)
         yield (alert if s == ALERT else warn)(f'{where}: {n}: "{snip.strip()}"', 'Read it before your agent runs it again; remove the plugin/skill if you did not expect this')
 
 
@@ -353,6 +354,40 @@ def extensions():
             ext = f'{j.get("publisher", "?")}.{j.get("name", Path(pj).parent.name)}'
             side = ' (sideloaded from a .vsix)' if meta.get(ext.lower(), {}).get('source') == 'vsix' else ''
             yield item(f'{editor} extension: {ext}{side}')
+
+
+# GlassWorm (2025) shipped VS Code / Open VSX extensions whose loader was a run of invisible variation selectors, decoded at run time.
+INVISIBLE_CODE = re.compile(rb'(?:\xf3\xa0[\x84-\x87][\x80-\xbf]|\xef\xb8[\x80-\x8f]){8,}')
+JS = ('.js', '.cjs', '.mjs', '.ts', '.jsx')
+
+
+def invisible_code(root):
+    """Script files under `root` (or inside it, for a Firefox .xpi) that carry a run of invisible variation selectors."""
+    if root.endswith('.xpi'):
+        try:
+            with zipfile.ZipFile(root) as z: yield from (f'{root}!{n}' for n in z.namelist() if n.endswith(JS) and INVISIBLE_CODE.search(z.read(n)))
+        except (OSError, zipfile.BadZipFile): pass
+        return
+    for d, dirs, fs in os.walk(root):
+        dirs[:] = [x for x in dirs if x != '.git']
+        for f in fs:
+            p = os.path.join(d, f)
+            try:
+                if f.endswith(JS) and os.path.getsize(p) < 32 << 20 and INVISIBLE_CODE.search(Path(p).read_bytes()): yield p
+            except OSError: pass
+
+
+@check('Extension code', FAM, slow=True)
+def extension_code():
+    from .persistence import CHROMIUM
+    roots = [(e, f) for e, r in EDITORS for f in files(f'{r}/*')]
+    roots += [(n, f) for n, sub, flat in CHROMIUM for f in files(f'~/.config/{sub}/*/Extensions/*', f'~/.var/app/{flat}/config/{sub}/*/Extensions/*')]
+    roots += [('Firefox', f) for f in files('~/.mozilla/firefox/*/extensions/*.xpi', '~/.var/app/org.mozilla.firefox/.mozilla/firefox/*/extensions/*.xpi')]
+    for app, ext in roots:
+        if os.path.isdir(ext) or ext.endswith('.xpi'):
+            for p in list(invisible_code(ext))[:1]:   # one row per extension
+                yield alert(f'{app} extension {os.path.basename(ext)} hides code in invisible Unicode characters: {tilde(p)}',
+                            'Remove the extension, then rotate GitHub, npm and Open VSX tokens and move any crypto wallet funds')
 
 
 def repos():

@@ -90,5 +90,17 @@ def test_claude_settings():
     assert [sev for _, sev, _ in rows] == [0, 0, 0] and any('NODE_OPTIONS' in t for t, _, _ in rows), rows
 
 
+def test_invisible_code():
+    from arche.ai import invisible_code
+    d = tempfile.mkdtemp()
+    hidden = ''.join(chr(0xE0100 + b) for b in b'fetch("https://x")')
+    open(os.path.join(d, 'evil.js'), 'w', encoding='utf-8').write(f'const s = "{hidden}"; eval(decode(s))')
+    open(os.path.join(d, 'ok.js'), 'w', encoding='utf-8').write('const heart = "\u2764\ufe0f\u2764\ufe0f"; // fine')
+    with zipfile.ZipFile(os.path.join(d, 'a.xpi'), 'w') as z: z.writestr('bg.js', f'x("{hidden}")')
+    assert sorted(os.path.basename(p) for p in invisible_code(d)) == ['evil.js']
+    assert list(invisible_code(os.path.join(d, 'a.xpi'))) == [os.path.join(d, 'a.xpi') + '!bg.js']
+    assert [s for _, s, _ in scan_text(f'x = "{hidden}"', 'skill')] == [2]
+
+
 if __name__ == '__main__':
-    test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
