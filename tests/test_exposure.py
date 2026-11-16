@@ -2,7 +2,7 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
 import tempfile, unittest
 from unittest import mock
-from arche import exposure
+from arche import exposure, intel
 from arche.core import WARN, INFO
 
 SS = '''udp UNCONN 0 0 0.0.0.0:41641 0.0.0.0:*
@@ -82,6 +82,14 @@ class Gateway(unittest.TestCase):
         self.assertEqual([s for _, s, _ in exposure.gateway_rows('192.168.1.1', {'192.168.1.1': 'aa:bb:cc:dd:ee:ff'})], [INFO])
         self.assertEqual(list(exposure.gateway_rows('192.168.1.1', {})), [])
         self.assertEqual(exposure.maker('02:00:00:00:00:01'), 'randomised or virtual address')
+
+    def test_dns(self):
+        rows = [t for t, _, _ in exposure.dns_rows(['1.1.1.1', '192.168.4.100', 'fe80::1%eno1', '::1', '45.9.148.1', 'not-an-ip'])]
+        self.assertEqual(rows, ['DNS server 1.1.1.1 (Cloudflare)', 'DNS server 192.168.4.100 (on your local network)',
+                                'DNS server fe80::1%eno1 (on your local network)', 'DNS server ::1 (this PC)', 'DNS server 45.9.148.1 (a public server)'])
+        with mock.patch.object(intel, 'sh', return_value='Global: 9.9.9.9#dns.quad9.net\nLink 2 (eno1): 192.168.1.1\n'), \
+             mock.patch.object(intel, 'text', return_value='nameserver 127.0.0.53\nnameserver 192.168.1.1\n'):
+            self.assertEqual(exposure.dns_servers(), ['192.168.1.1', '9.9.9.9'])
 
 
 class Tunnels(unittest.TestCase):

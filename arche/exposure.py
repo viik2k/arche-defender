@@ -7,6 +7,7 @@ import ipaddress, json, os, re, socket, time, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
 from .core import check, warn, item, sh, have, text, files
 from .hardening import INFRA_IF, argv
+from .intel import dns_servers
 
 RISKY = {21: 'FTP', 23: 'Telnet', 139: 'Windows file sharing (SMB)', 445: 'Windows file sharing (SMB)',
          2375: 'Docker API without TLS (root on this PC for anyone who connects)', 3306: 'MySQL', 3389: 'Remote desktop (RDP)',
@@ -186,8 +187,27 @@ def gateway_rows(gw, neigh):
     yield item(f'Router {gw} is {mac} ({maker(mac)})', fix='If this changes without a new router, another device may be impersonating it.')
 
 
+RESOLVERS = {'1.1.1.1': 'Cloudflare', '1.0.0.1': 'Cloudflare', '2606:4700:4700::1111': 'Cloudflare', '2606:4700:4700::1001': 'Cloudflare',
+             '8.8.8.8': 'Google', '8.8.4.4': 'Google', '2001:4860:4860::8888': 'Google', '2001:4860:4860::8844': 'Google',
+             '9.9.9.9': 'Quad9', '149.112.112.112': 'Quad9', '2620:fe::fe': 'Quad9', '2620:fe::9': 'Quad9',
+             '208.67.222.222': 'OpenDNS', '208.67.220.220': 'OpenDNS', '94.140.14.14': 'AdGuard', '94.140.15.15': 'AdGuard',
+             '100.100.100.100': 'Tailscale'}
+
+
+def dns_rows(servers):
+    """Each resolver as a tracked item: a DNS server that changes on its own (malware, a hijacked router) is how fake sites get served."""
+    for s in servers:
+        try: a = ipaddress.ip_address(s.split('%')[0])
+        except ValueError: continue
+        where = RESOLVERS.get(str(a)) or ('this PC' if a.is_loopback else 'on your local network' if a.is_private or a.is_link_local else 'a public server')
+        yield item(f'DNS server {s} ({where})', fix='If you did not set this, check the DNS setting of your network connection and in the router: '
+                                                   'a DNS server you did not choose can send you to fake sites.')
+
+
 @check('Local network', 'Network')
 def local():
+    """The router's hardware address (another device claiming it is ARP spoofing) and the DNS servers in use, tracked for changes."""
+    yield from dns_rows(dns_servers())
     neigh = {ip: mac.lower() for ip, mac in re.findall(r'^(\S+) dev \S+ lladdr (\S+)', sh('ip', '-4', 'neigh', 'show'), re.M)}
     for gw in dict.fromkeys(re.findall(r'^default via (\S+)', sh('ip', '-4', 'route', 'show', 'default'), re.M)):
         yield from gateway_rows(gw, neigh)

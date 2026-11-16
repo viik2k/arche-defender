@@ -184,8 +184,10 @@ def peers():
 
 
 def dns_servers():
-    found = {x for l in sh('resolvectl', 'dns').splitlines() for x in l.partition(': ')[2].split()}
-    return sorted(found or re.findall(r'^nameserver\s+(\S+)', text('/etc/resolv.conf'), re.M))
+    """Resolvers in use: systemd-resolved's per-link servers and /etc/resolv.conf's, minus resolved's own stub."""
+    found = {x.split('#')[0] for l in sh('resolvectl', 'dns').splitlines() for x in l.partition(': ')[2].split()}   # '#' names a DoT server
+    found |= set(re.findall(r'^nameserver\s+(\S+)', text('/etc/resolv.conf'), re.M))
+    return sorted(found - {'127.0.0.53', '127.0.0.54'})
 
 
 @check('Known-bad connections', 'Threats')
