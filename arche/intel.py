@@ -1,6 +1,6 @@
 # Threat intel: public IP, domain and hash feeds cached under STATE/intel, matched offline during scans.
-# The only network access in the tool is intel-update, which the user runs; scans never download anything.
-import csv, io, ipaddress, json, os, re, time, urllib.request, zipfile
+# Network access here happens only in actions the user runs (intel-update, password-check); scans never download anything.
+import csv, hashlib, io, ipaddress, json, os, re, time, urllib.request, zipfile
 from pathlib import Path
 from .core import check, action, alert, warn, item, sh, text, files, jsonf, write_private, STATE, HOME
 from .browsers import copy_query
@@ -205,3 +205,16 @@ def browsing():
             for where, hit in sorted(hits.items()):
                 yield alert(f'{name} visited {where} in the last 30 days, listed by {hit}',
                             fix='If you entered a password there, change it. Run a full scan, and check Browser extensions.')
+
+
+@action('password-check', 'Check whether a password is in known data breaches (only the first 5 characters of its SHA-1 leave this PC)', arg='password')
+def password_check(pw):
+    """Have I Been Pwned's k-anonymity range API: the server never sees the password or its full hash."""
+    h = hashlib.sha1(pw.encode()).hexdigest().upper()
+    req = urllib.request.Request(f'https://api.pwnedpasswords.com/range/{h[:5]}', headers={'User-Agent': 'arche-defender', 'Add-Padding': 'true'})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r: body = r.read(4 << 20).decode('ascii', 'replace')
+    except OSError as e: return f'Could not reach the breach database: {e}'
+    n = next((int(c) for suf, _, c in (l.strip().partition(':') for l in body.splitlines()) if suf == h[5:] and c.isdigit()), 0)
+    return (f'This password is in known breaches {n:,} times. Stop using it wherever you use it, and change it there.' if n else
+            'Not in any known breach. Still use a different password for every site (a password manager makes that easy).')

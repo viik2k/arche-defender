@@ -79,7 +79,8 @@ Also in the window's **Tools** menu.
 
 | Action | Does |
 |---|---|
-| `intel-update` | downloads the threat-intel feeds; the only network access the tool makes |
+| `intel-update` | downloads the threat-intel feeds; scans themselves never use the internet (the full-scan UPnP check only talks to your router) |
+| `password-check` | tells you whether a password is in known data breaches (Have I Been Pwned range API: only the first 5 characters of its SHA-1 are sent) |
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |

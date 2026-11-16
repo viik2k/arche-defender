@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import unittest
+import hashlib, io, unittest
 from unittest import mock
 from arche import intel
 
@@ -84,3 +84,18 @@ class Lookup(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PasswordCheck(unittest.TestCase):
+    def test_range(self):
+        h = hashlib.sha1(b'hunter2').hexdigest().upper()
+        body = f'{"0" * 35}:0\r\n{h[5:]}:17043\r\nABCDEF0123456789ABCDEF0123456789ABC:3\r\n'.encode()
+        seen = {}
+        class R(io.BytesIO):
+            def __enter__(self): return self
+            def __exit__(self, *a): pass
+        def fake(req, timeout): seen['url'] = req.full_url; return R(body)
+        with mock.patch('urllib.request.urlopen', fake):
+            self.assertIn('17,043 times', intel.password_check('hunter2'))
+            self.assertEqual(seen['url'], f'https://api.pwnedpasswords.com/range/{h[:5]}')
+            self.assertTrue(intel.password_check('something else entirely').startswith('Not in any known breach'))
