@@ -222,6 +222,13 @@ def judge_server(name, s, where):
     cmd = ' '.join(str(x) for x in [s.get('command', ''), *s.get('args', [])])
     if re.search(r'(^|/)(tmp|dev/shm|var/tmp)/|/Downloads/', cmd): yield alert(f'MCP server {name} ({where}) runs a program from a temp/download folder: {redact(cmd)[:160]}')
     yield from scan_text(cmd, f'MCP server {name} ({where})')
+    # Tools the agent may call without asking: Gemini CLI and Qwen Code "trust", Cline and Roo Code "alwaysAllow", Kiro and Amazon Q "autoApprove".
+    # A web page, issue or file the agent reads can then make it call them.
+    ok = s.get('alwaysAllow') or s.get('autoApprove') or []
+    if s.get('trust') is True or ok is True or isinstance(ok, list) and '*' in ok:
+        yield warn(f'MCP server {name} ({where}) runs every one of its tools without asking',
+                   'Remove "trust": true (or the "*" in autoApprove) and approve only read-only tools by name')
+    elif isinstance(ok, list) and ok: yield item(f'MCP server {name} ({where}) runs these tools without asking: {", ".join(map(str, ok))[:150]}')
     # Playwright and Chrome DevTools MCP keep a throwaway profile of their own unless told to attach to the browser you use
     if re.search(r'playwright|chrome-devtools|puppeteer|browser', cmd, re.I) and re.search(
             r'--(cdp-?endpoint|browser-?url|ws-?endpoint|auto-?connect|extension)\b|--user-?data-?dir[= ]\S*(google-chrome|chromium|BraveSoftware|microsoft-edge|vivaldi)', cmd, re.I):
