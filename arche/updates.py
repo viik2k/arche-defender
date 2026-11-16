@@ -137,12 +137,25 @@ def dnf_repo_rows(repos):
         else: yield item(f'Package source: {name} ({host})')
 
 
+def orphan_rows(names):
+    """Installed packages that no enabled repo has (by name): nothing will ever update them."""
+    if names: yield warn(f'Never updated, since no enabled repo has them: {len(names)} package{"s" * (len(names) > 1)} ('
+                         + ', '.join(sorted(names)[:6]) + ', …' * (len(names) > 6) + ')',
+                         fix='If you still use them, re-enable the repo they came from or switch to a maintained build; otherwise remove them.')
+
+
 @check('Package sources', 'Updates')
 def sources():
-    """Where software comes from: every enabled repo and Flatpak remote, and any that skip signature or TLS checks."""
+    """Where software comes from: every enabled repo and Flatpak remote, any that skip signature or TLS checks,
+    and installed packages no repo has any more (left by a removed repo, or installed from a downloaded file)."""
     if have('dnf'):
-        try: yield from dnf_repo_rows(json.loads(sh('dnf', '-C', '-q', 'repo', 'info', '--enabled', '--json', timeout=60) or '[]'))
-        except ValueError: pass
+        try: repos = json.loads(sh('dnf', '-C', '-q', 'repo', 'info', '--enabled', '--json', timeout=60) or '[]')
+        except ValueError: repos = []
+        yield from dnf_repo_rows(repos)
+        if repos and all(r.get('timestamp', -1) > 0 for r in repos):   # a repo with no cached metadata would make all its packages look orphaned
+            yield from orphan_rows(sh('dnf', '-C', '-q', 'repoquery', '--extras', '--qf', '%{name}\n', timeout=60).split())
+    elif have('apt'):
+        yield from orphan_rows([l.split('/')[0] for l in sh('apt', 'list', '--installed', timeout=60).splitlines() if ',local]' in l])
     for f in files('/etc/yum.repos.d/*.repo', '/etc/dnf/dnf.conf'):
         if re.search(r'^\s*sslverify\s*=\s*(0|false|no)\b', text(f), re.M | re.I):
             yield warn(f'{f} turns off TLS certificate checks (sslverify=0)', fix=f'Remove sslverify=0 from {f}.')

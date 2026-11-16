@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import shutil, tempfile, time, unittest
+import json, shutil, tempfile, time, unittest
 from pathlib import Path
 from unittest import mock
 from arche import updates
@@ -37,6 +37,16 @@ class Pending(unittest.TestCase):
         with mock.patch.object(updates, 'have', lambda c: c == 'dnf'), mock.patch.object(updates, 'sh', lambda *a, **k: ''), \
              mock.patch.object(updates, 'list_age', lambda *g: 9):
             self.assertEqual([t for t, _, _ in updates.pending() if 'list' in t], ['The update list was last downloaded 9 days ago, so newer updates are not counted'])
+
+
+class Orphans(unittest.TestCase):
+    def test_extras_only_with_full_cache(self):
+        repos = lambda ts: json.dumps([{'id': 'fedora', 'is_enabled': True, 'pkg_gpgcheck': True, 'metalink': 'https://mirrors.fedoraproject.org/x', 'timestamp': ts}])
+        for ts, want in ((1794838258, ['Never updated, since no enabled repo has them: 7 packages (a, b, c, d, e, f, …)']), (-1, [])):
+            out = {'repo': repos(ts), 'repoquery': 'g\nf\ne\nd\nc\nb\na\n'}
+            with mock.patch.object(updates, 'have', lambda c: c == 'dnf'), mock.patch.object(updates, 'sh', lambda *a, **k: out.get(a[3], '')), \
+                 mock.patch.object(updates, 'files', lambda *g: []):
+                self.assertEqual([t for t, s, _ in updates.sources() if s == WARN], want)
 
 
 class Snaps(unittest.TestCase):
