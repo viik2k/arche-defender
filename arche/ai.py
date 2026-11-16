@@ -541,6 +541,20 @@ def model_risks(p):
             if r[1] == ALERT: yield ALERT, f'its chat template: {r[0]}'
 
 
+HF_HUB = os.path.join(os.environ.get('HF_HOME') or f'{HOME}/.cache/huggingface', 'hub')
+
+
+@check('Hub model code', FAM)
+def hub_code():
+    # A Hugging Face model or dataset that ships .py files runs them when loaded with trust_remote_code=True (or as a datasets script).
+    for repo in files(f'{HF_HUB}/models--*', f'{HF_HUB}/datasets--*'):
+        kind, _, name = os.path.basename(repo).partition('--')
+        name = name.replace('--', '/')
+        pys = files(f'{repo}/snapshots/*/*.py', f'{repo}/snapshots/*/*/*.py')
+        if pys: yield item(f'Hugging Face {kind[:-1]} {name} ships Python code that runs when it is loaded with trust_remote_code')
+        for p in pys: yield from scan_text(text(p), f'Hugging Face {name} {os.path.basename(p)}')
+
+
 @check('AI model files', FAM, slow=True)
 def models():
     # Pickle-format models (.pt/.ckpt/.bin/.pkl) can run any code when loaded, Keras Lambda layers too, and a GGUF chat
