@@ -14,12 +14,12 @@ FIX = {'package-lock.json': 'npm audit fix', 'pnpm-lock.yaml': 'pnpm update', 'C
        'uv.lock': 'uv lock --upgrade', 'requirements.txt': 'raise the pinned versions'}
 RANK = {'CRITICAL': 0, 'HIGH': 1, 'MODERATE': 2, 'MEDIUM': 2, 'LOW': 3}   # unrated counts as moderate
 LEVEL = ('critical', 'high', 'moderate', 'low')
-# Installed tools: what npx ran (MCP servers), global npm/pnpm packages, uv/pipx tool environments, Claude Code itself.
+# Installed tools: what npx ran (MCP servers), global npm/pnpm packages, uv/pipx tool environments, pip --user, Claude Code itself.
 TOOLS = ('~/.npm/_npx/*/package-lock.json', '~/.npm-global/lib/node_modules/.package-lock.json',
          '~/.nvm/versions/node/*/lib/node_modules/.package-lock.json', '/usr/lib/node_modules/.package-lock.json',
          '/usr/local/lib/node_modules/.package-lock.json', '~/.local/share/pnpm/global/*/pnpm-lock.yaml',
          '~/.local/share/uv/tools/*/lib/python3*/site-packages', '~/.local/share/pipx/venvs/*/lib/python3*/site-packages',
-         '~/.cache/uv/environments-v*/*/lib/python3*/site-packages', '~/.local/share/claude/versions')
+         '~/.cache/uv/environments-v*/*/lib/python3*/site-packages', '~/.local/lib/python3*/site-packages', '~/.local/share/claude/versions')
 
 
 def lockfiles(root, depth=5):
@@ -38,6 +38,7 @@ def tool(path):
     if path.endswith('/claude/versions'): return 'Claude Code', 'claude update'
     if path.endswith('pnpm-lock.yaml'): return 'Global pnpm packages', 'pnpm update -g'
     if path.endswith('.package-lock.json'): return f'Global npm packages in {path.split("/lib/node_modules/")[0].replace(HOME, "~")}', 'npm update -g'
+    if path.startswith(f'{HOME}/.local/lib/python'): return 'Python packages installed with pip --user', 'pip install --user --upgrade <name>'
     env = path.split('/lib/python')[0]
     return f'Python tool {os.path.basename(env)}', ('uv cache clean' if '/environments-v' in env else 'uv tool upgrade --all, or pipx upgrade-all')
 

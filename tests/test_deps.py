@@ -92,6 +92,7 @@ class Packages(unittest.TestCase):
         npx.write_text(json.dumps({'packages': {'': {'dependencies': {'mcp-remote': '^0.1'}}}}))
         self.assertEqual(deps.tool(str(npx))[0], 'npx mcp-remote')
         self.assertEqual(deps.tool('/usr/local/lib/node_modules/.package-lock.json'), ('Global npm packages in /usr/local', 'npm update -g'))
+        self.assertEqual(deps.tool(f'{deps.HOME}/.local/lib/python3.14/site-packages')[0], 'Python packages installed with pip --user')
 
 
 DET = {'GHSA-crit': {'sev': 'CRITICAL', 'summary': '', 'aliases': ['PYSEC-1']}, 'PYSEC-1': {'sev': '?', 'summary': '', 'aliases': ['GHSA-crit']},
