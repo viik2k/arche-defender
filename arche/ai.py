@@ -1171,7 +1171,7 @@ MAGIC = {b'\x7fELF': 'Linux program', b'MZ': 'Windows program', b'\xcf\xfa\xed\x
 def vet_rows(root):
     """Findings for an unpacked skill, plugin, MCP server or extension: rule hits in its text, the commands it runs on its own
     (hooks, MCP servers, install scripts), wide allowed-tools, and compiled programs nothing here can read."""
-    from . import malware
+    from . import malware, containers
     n, bins = 0, []
     for d, dirs, fs in os.walk(root) if os.path.isdir(root) else [(os.path.dirname(root), [], [os.path.basename(root)])]:
         dirs[:] = [x for x in dirs if x != '.git']   # node_modules stays: a bundled dependency is where a payload hides
@@ -1184,6 +1184,10 @@ def vet_rows(root):
             if not k and os.path.splitext(f)[1].lower() in SCAN_EXT and st.st_size < 2 << 20: yield from scan_text(text(p), p)
             else: yield from malware.inspect(p, st, False, risky=True)   # hashes, lures, documents, nested zips
             if f == 'SKILL.md' or f.endswith('.md') and re.search(r'/(commands|agents)/', p): yield from preapproval_warns([p])
+            if re.match(r'(docker-)?compose([.-][\w.-]+)?\.ya?ml$|\.?devcontainer\.json$', f) and (risks := containers.config_risks(
+                    text(p) if f.endswith('ml') else containers.devcontainer_text(j if isinstance(j := jsonc(p), dict) else {}))):
+                yield warn(f'{p}: a container started from it ' + '; '.join(risks),
+                           'Read why it needs that before docker compose up or "Reopen in Container", and remove what it does not need')
             if not f.endswith('.json'): continue
             j = jsonc(p)
             if not isinstance(j, dict): continue
