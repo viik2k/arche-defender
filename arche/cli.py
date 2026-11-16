@@ -63,6 +63,7 @@ def scan(args):
             print(f'{"!!" if any(r.sev == ALERT for r in rows) else "--" if flagged else "ok"}  {n} ({len(rows)})')
             for r in flagged: print(f'    [{MARK[r.sev]}] {r.text}' + (f'\n        fix: {r.fix}' if r.fix else ''))
         print(f'score {core.score(res)}/100' + ('' if base is not None else '  (no baseline yet: review, then run again with --accept)'))
+    if not args.only: core.record(res, 'full' if args.full else 'quick')
     if args.accept: core.save_baseline(res); print('baseline saved', file=sys.stderr)
     return exit_code(res)
 

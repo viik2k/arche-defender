@@ -48,6 +48,7 @@ def gui():
     det.tag_configure('head', font=('TkDefaultFont', 11, 'bold'), spacing1=8, spacing3=4)
 
     results, q, busy, refs = {}, queue.Queue(), [], {}   # refs: text tag -> (check, row text, is ignored) for right-click
+    hist, mon = list(core.jsonf(core.HISTORY) or []), {}   # busy holds the running scan's kind ('quick', 'full', or None for a partial re-scan)
     tree.insert('', 'end', 'overview', text='  Overview', tags=('family',))
     for n, c in CHECKS.items():
         if not tree.exists('f:' + c.family): tree.insert('', 'end', 'f:' + c.family, text='  ' + c.family, open=True, tags=('family',))
@@ -77,6 +78,11 @@ def gui():
             for t in sorted(load_ignored().get(n, ())): det.insert('end', f'    ignored: {t}\n', ('fix', ref(n, t, True)))
         else:
             fam = None if sel == 'overview' else sel[2:]
+            if sel == 'overview' and hist:
+                h = hist[-30:]; d = h[-1]['score'] - h[-2]['score'] if len(h) > 1 else 0
+                det.insert('end', f"Score {h[-1]['score']}/100" + (f' ({d:+} since the scan before)' if d else '') + f'   history: {core.spark(h)}\n', 'head')
+                det.insert('end', ('Background monitor on: hourly scans and a watch on Downloads and autostart.' if monitor_on() else
+                                   'Background monitor off: Tools > install-monitor scans hourly and watches your Downloads.') + '\n\n', 'fix')
             names = [n for n, c in CHECKS.items() if n in results and fam in (None, c.family)]
             hits = [(n, [r for r in results[n] if r.sev or r.new]) for n in names]
             if not names: det.insert('end', 'Run a scan to see findings.')
@@ -84,6 +90,10 @@ def gui():
             for n, h in sorted(hits, key=lambda x: -max([r.sev for r in x[1]] or [0])):
                 if h: det.insert('end', n + '\n', 'head'); write_rows(n, h)
         det.config(state='disabled')
+
+    def monitor_on():   # one systemctl call per window (and per Tools action), not one per repaint
+        if 'on' not in mon: mon['on'] = core.sh('systemctl', '--user', 'is-active', 'arche-defender.timer').strip() == 'active'
+        return mon['on']
 
     def paint(n):
         rows = results[n]
@@ -112,7 +122,7 @@ def gui():
 
     def start(full_scan, names=None):
         if busy: return
-        busy.append(1); quick.config(state='disabled'); full.config(state='disabled')
+        busy.append(None if names else 'full' if full_scan else 'quick'); quick.config(state='disabled'); full.config(state='disabled')
         names = names or pick(full_scan)
         for n in names: results.pop(n, None); tree.item('c:' + n, text=n + '  ...', tags=('idle',))
         status.config(text='Scanning ...')
@@ -120,6 +130,7 @@ def gui():
         root.after(100, drain)
 
     def finish():
+        if busy[0]: hist[:] = core.record(results, busy[0])
         busy.clear(); quick.config(state='normal'); full.config(state='normal')
         rows = [r for rs in results.values() for r in rs]
         base = load_baseline()
@@ -152,6 +163,7 @@ def gui():
         def go():
             try: msg = fn(arg) if argname else fn()
             except Exception as e: msg = f'{name} failed: {e}'
+            mon.clear()
             root.after(0, lambda: (status.config(text=str(msg).splitlines()[0] if msg else name + ' done'),
                                    messagebox.showinfo(name, str(msg))))
         threading.Thread(target=go, daemon=True).start()

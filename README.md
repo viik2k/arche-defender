@@ -42,6 +42,7 @@ Every finding is an **alert** (red, -15 points), a **warning** (orange, -4) or a
 against the baseline (-1 when new). Most come with a `fix:` line.
 A finding you have judged harmless can be ignored (right-click it): that exact line stops counting, and nothing
 else in the same check is hidden with it.
+Every complete scan's score is kept, so the Overview shows whether the machine is getting safer (`history` prints it).
 
 | Family | What it looks at |
 |---|---|
@@ -84,6 +85,7 @@ Also in the window's **Tools** menu.
 | `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
 | `ignore "Check: text"` / `unignore "Check: text"` / `ignored` | hide one finding for good (in the window: right-click it), show it again, list them |
+| `history` | the score of the last 20 complete scans |
 
 ### Threat-intel feeds
 
@@ -96,7 +98,7 @@ Your own indicators (IPs, CIDRs, domains, hashes, one per line) go in `~/.config
 
 ## Privacy of its own data
 
-The baseline, quarantine, intel cache and monitor state live in `~/.local/state/arche-defender/`, mode 700/600.
+The baseline, quarantine, intel cache, score history and monitor state live in `~/.local/state/arche-defender/`, mode 700/600.
 They describe your machine: do not publish them. Reports (**Save report**, HTML or JSON) contain the same and are
 written mode 600. Secret files such as `~/.claude/.credentials.json` are only `stat`ed for their permissions, never read,
 and detected API keys are reported by type and file, never by value.

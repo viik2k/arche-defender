@@ -173,3 +173,28 @@ def score(results):
 
 
 def stamp(): return time.strftime('%Y-%m-%d %H:%M:%S')
+
+
+HISTORY = STATE / 'history.json'   # one entry per complete scan, newest last
+
+
+def record(results, kind):
+    """Add a complete quick/full scan to the score history (the last 400 are kept) and return the history."""
+    rows = [r for rs in results.values() for r in rs]
+    h = list(jsonf(HISTORY) or [])[-399:] + [{'time': stamp(), 'kind': kind, 'score': score(results), 'alerts': sum(r.sev == ALERT for r in rows),
+                                               'warnings': sum(r.sev == WARN for r in rows), 'new': sum(bool(r.new) for r in rows)}]
+    write_private(HISTORY, json.dumps(h))
+    return h
+
+
+def spark(h):
+    """Scores as a text sparkline, scaled to their own range so small moves show."""
+    lo, hi = min(e['score'] for e in h), max(e['score'] for e in h)
+    return ''.join('▁▂▃▄▅▆▇█'[(e['score'] - lo) * 7 // (hi - lo) if hi > lo else 4] for e in h)
+
+
+@action('history', 'the score of the last 20 complete scans')
+def _history():
+    h = list(jsonf(HISTORY) or [])[-20:]
+    return '\n'.join([spark(h)] + [f"{e['time']}  {e['kind']:<5} {e['score']:3}/100  {e['alerts']} alerts, {e['warnings']} warnings, {e['new']} new"
+                                    for e in h]) if h else 'No scans recorded yet.'

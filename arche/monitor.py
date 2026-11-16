@@ -3,7 +3,7 @@
 # checks for Downloads and autostart within seconds of something landing there. Nothing runs as root.
 import json, os, sys, time
 from pathlib import Path
-from .core import STATE, ALERT, action, jsonf, write_private, sh, have, load_baseline, stamp
+from .core import STATE, ALERT, action, jsonf, write_private, sh, have, load_baseline, stamp, record
 
 UNITS = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'systemd/user'
 SEEN = STATE / 'notified.json'
@@ -29,6 +29,7 @@ def run(only=None):
     res = scan_all(load_baseline(), names)
     told = set(seen.get('told', []))
     flagged, fresh = fresh_findings(res, told)
+    if not only: record(res, 'full' if full else 'quick')
     if fresh and have('notify-send'):
         a = sum(flagged[t] == ALERT for t in fresh)
         title = f'Arche Defender: {len(fresh)} new finding{"s" * (len(fresh) > 1)}' + (f', {a} alert{"s" * (a > 1)}' if a else '')
