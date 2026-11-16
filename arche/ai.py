@@ -110,8 +110,8 @@ def jsonc(p):
 
 def scan_text(t, where):
     """Rule hits in one file or command: AI rules plus the malware rules when that module is present."""
-    low = t.lower()
-    hits = [(n, s, m.group(0)[:80]) for n, s, rx, h in AI_RULES if (not h or any(x in low for x in h)) and (m := rx.search(t))]
+    low, asc = t.lower(), t.isascii()   # the hint-less rules all hunt invisible Unicode: plain ASCII text cannot hold it
+    hits = [(n, s, m.group(0)[:80]) for n, s, rx, h in AI_RULES if (not asc if h is None else any(x in low for x in h)) and (m := rx.search(t))]
     if _match: hits += _match(t)
     for n, s, snip in hits:
         snip = redact(snip.encode('unicode_escape').decode() if re.search(r'[\U000E0000-\U000E01EF\uFE00-\uFE0F‪-‮⁦-⁩]', snip) else snip)
