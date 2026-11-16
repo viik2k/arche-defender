@@ -72,11 +72,11 @@ def pending():
                                                fix='Restart to load the patched kernel.')
 
 
-@check('Flatpak updates', 'Updates', slow=True)
+@check('Flatpak updates', 'Updates')
 def flatpaks():
-    """Asks the Flatpak remotes, so it needs the network and runs only in a full scan."""
+    """From the remotes' cached summaries (your software center refreshes them), so scans stay offline; and end-of-life runtimes."""
     if not have('flatpak'): return
-    ups = [l for l in sh('flatpak', 'remote-ls', '--updates', '--columns=application', timeout=180).splitlines() if '.' in l]
+    ups = [l for l in sh('flatpak', 'remote-ls', '--updates', '--cached', '--columns=application', timeout=60).splitlines() if '.' in l]
     if ups: yield warn(f'{len(ups)} Flatpak updates waiting: {", ".join(ups[:5])}{"..." if len(ups) > 5 else ""}', fix='Run: flatpak update')
     eol = re.findall(r'^(\S+)\s.*end-of-life', sh('flatpak', 'list', '--columns=application,options', timeout=60), re.M | re.I)
     for a in eol: yield warn(f'Flatpak {a} uses an end-of-life runtime', fix='Run: flatpak update; if it stays, the app is unmaintained.')
