@@ -20,7 +20,8 @@ WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'),
          'Desktop add-ons': ('%h/.local/share/plasma/plasmoids', '%h/.local/share/kwin/scripts', '%h/.local/share/gnome-shell/extensions'),
          # not ~/.claude itself: Claude Code writes its history there on every prompt
          'AI plugins, skills and hooks': ('%h/.claude/skills', '%h/.claude/plugins', '%h/.codex/skills', '%h/.gemini/extensions', '%h/.agents/skills',
-                                          '%h/.copilot/installed-plugins', '%h/.openclaw/skills'),
+                                          '%h/.copilot/installed-plugins', '%h/.openclaw/skills', '%h/.config/opencode/plugin',
+                                          '%h/.config/opencode/plugins', '%h/.claude/output-styles'),
          # a new MCP server, from the agents' config files; not ~/.claude.json, which Claude Code rewrites on every prompt
          'MCP servers': ('%h/.cursor/mcp.json', '%h/.gemini/settings.json', '%h/.codex/config.toml', '%h/.config/Code/User/mcp.json',
                          '%h/.config/Claude/claude_desktop_config.json', '%h/.codeium/windsurf/mcp_config.json', '%h/.config/goose/config.yaml',

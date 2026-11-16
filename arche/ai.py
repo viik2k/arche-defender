@@ -92,19 +92,23 @@ PROJECT_MCP = ('.mcp.json', '.vscode/mcp.json', '.cursor/mcp.json', '.gemini/set
                '.amazonq/mcp.json', 'opencode.json', '.zed/settings.json')
 MEMORY_FILES = ('~/.claude/CLAUDE.md', '~/.claude/memory/*.md', '~/.claude/projects/*/memory/*.md', '~/.codex/AGENTS.md', '~/.gemini/GEMINI.md',
                 '~/.config/opencode/AGENTS.md', '~/.qwen/QWEN.md', '~/.windsurf/memories/*', '~/.codeium/windsurf/memories/*',
-                '~/.openclaw/workspace/*.md', '~/.openclaw/workspace/memory/*.md')   # OpenClaw re-reads HEARTBEAT.md on a timer
+                '~/.openclaw/workspace/*.md', '~/.openclaw/workspace/memory/*.md',
+                '~/.claude/output-styles/*.md')   # an output style is system prompt: it loads into every session that picks it   # OpenClaw re-reads HEARTBEAT.md on a timer
 CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
 SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.agents/skills', '~/.codex/skills', '~/.codex/prompts',
               '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules',
+              '~/.config/opencode/agents', '~/.config/opencode/commands', '~/.cursor/commands',
               '~/.openclaw/skills', '~/.openclaw/workspace/skills',   # ClawHub skills: hundreds shipped stealers in 2026
               '~/.copilot/skills', '~/.copilot/agents', '~/.qwen/commands', '~/.qwen/agents',
               '~/.config/anythingllm-desktop/storage/plugins/agent-skills')   # AnythingLLM custom skills: Node code its agent runs with your rights
+OPENCODE_PLUGINS = ('~/.config/opencode/plugin', '~/.config/opencode/plugins')   # JS/TS that opencode loads into itself at start
 COPILOT_PLUGINS = '~/.copilot/installed-plugins'   # GitHub Copilot CLI plugins: skills, agents, hooks and MCP servers, as Claude Code's
 OPENCLAW = ('~/.openclaw/openclaw.json', '~/.clawdbot/clawdbot.json', '~/.moltbot/moltbot.json', '~/.openclaw/exec-approvals.json')
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.clinerules/*', '.roorules',
                      '.rules', '.github/copilot-instructions.md', '.github/instructions/*', '.github/prompts/*', '.github/chatmodes/*',
                      '.windsurf/rules/*', '.roo/rules/*', '.roo/rules-*/*', '.kiro/steering/*', '.amazonq/rules/*', '.continue/rules/*',
-                     '.junie/guidelines.md')   # the rules files a "rules file backdoor" hides instructions in
+                     '.junie/guidelines.md', '.cursor/commands/*', '.windsurf/workflows/*', '.claude/output-styles/*',
+                     '.opencode/agent/*', '.opencode/agents/*', '.opencode/command/*', '.opencode/commands/*')   # the rules files a "rules file backdoor" hides instructions in
 
 
 def tilde(p): return str(p).replace(HOME, '~', 1)
@@ -320,6 +324,8 @@ def plugins():
         yield item(ver(f'LSP server {k} (plugin {name}): {redact(cmd)[:160]}'))
         yield from scan_text(cmd, f'LSP server {k} (plugin {name})')
     for d in copilot_plugins(): yield item(f'Copilot CLI plugin {os.path.basename(d)} ({tilde(d)}), code {fingerprint(d)}')
+    for f in opencode_code('~/.config/opencode'): yield item(f'opencode plugin {os.path.basename(f)} ({tilde(f)}), code {fingerprint(f)}')
+    for x in opencode_npm(f'{HOME}/.config/opencode'): yield item(f'opencode plugin {x} (npm, installed and loaded by opencode at start)')
     codex = text(f'{HOME}/.codex/config.toml')
     if m := re.search(r'^notify\s*=\s*(.+)$', codex, re.M): yield item(f'Codex notify hook: {redact(m[1])[:160]}')
 
@@ -332,6 +338,7 @@ def contents():
         if os.path.isdir(os.path.expanduser(root)): yield from scan_tree(os.path.expanduser(root), 'skill')
     for d in files(f'{CLAUDE_EXT}/*'): yield from scan_tree(d, 'Claude Desktop extension')
     for d in copilot_plugins(): yield from scan_tree(d, 'Copilot CLI plugin')
+    for d in files(*OPENCODE_PLUGINS): yield from scan_tree(d, 'opencode plugin')
     yield from preapproval_warns(files(*(f'{r}/{g}' for r in SKILL_DIRS for g in ('*/SKILL.md', 'SKILL.md', '*.md')),
                                        *(f'{r}/{g}' for r in ('~/.claude/plugins/cache/*/*/*', *copilot_plugins()) for g in ('skills/*/SKILL.md', 'commands/*.md', 'agents/*.md'))))
     # Agent memory and global instructions load into every session: an injection an agent was tricked into saving stays there.
@@ -819,6 +826,17 @@ def repos():
     return sorted(roots)
 
 
+def opencode_code(r):
+    """The plugin files opencode loads from a config folder (~/.config/opencode, or a repo's .opencode)."""
+    return files(*(f'{r}/{d}/*.{e}' for d in ('plugin', 'plugins') for e in ('js', 'mjs', 'ts')))
+
+
+def opencode_npm(r):
+    """npm packages an opencode.json lists under "plugin": opencode installs them and loads them into itself."""
+    js = [jsonc(f) for f in files(f'{r}/opencode.json', f'{r}/opencode.jsonc', f'{r}/.opencode/opencode.json')]
+    return [str(x) for j in js if isinstance(j, dict) and isinstance(j.get('plugin'), list) for x in j['plugin']]
+
+
 def autorun_rows(r, rr):
     """Commands a folder runs by itself once an editor, dev container or aider opens it."""
     for t in (jsonc(f'{r}/.vscode/tasks.json').get('tasks') or []):
@@ -835,6 +853,20 @@ def autorun_rows(r, rr):
     for f in files(f'{r}/.continue/mcpServers/*'):
         for name, s in (continue_servers(text(f)) if f.endswith(('.yaml', '.yml')) else {n: x for _, n, x in servers(jsonc(f))}).items():
             yield from judge_server(name, s, f'project {rr}, Continue {os.path.basename(f)}')
+    # opencode, started in this folder, loads the plugin code in .opencode/plugin and the npm plugins its opencode.json lists
+    if code := [f'{rr}{f[len(r):]}' for f in opencode_code(f'{r}/.opencode')] + [f'npm {x}' for x in opencode_npm(r)]:
+        yield warn(f'{rr} loads code into opencode whenever you run it there: {", ".join(code)[:200]}',
+                   "In a repo you cloned that is its authors' code: read it before running opencode there")
+    # Kiro runs a workspace's agent hooks on file events: runCommand runs a shell command, askAgent sends the agent a prompt
+    for f in files(f'{r}/.kiro/hooks/*'):
+        j = jsonc(f)
+        th = j.get('then') if isinstance(j, dict) and j.get('enabled', True) is not False else None
+        if not isinstance(th, dict): continue
+        ev = (j.get('when') or {}).get('type', 'its trigger') if isinstance(j.get('when'), dict) else 'its trigger'
+        if c := th.get('command'):
+            yield warn(f'{rr}{f[len(r):]} runs a command whenever Kiro sees {ev} there: {redact(str(c))[:120]}',
+                       "In a repo you cloned that is its authors' command: read it before opening the folder in Kiro")
+        yield from scan_text(str(c or th.get('prompt') or ''), f'{rr}{f[len(r):]}')
     # aider reads .aider.conf.yml at the repo root: lint-cmd runs after every edit (auto-lint is on), test-cmd with auto-test, yes-always skips its prompts
     # ponytail: one-line values only; a YAML list under lint-cmd is missed
     if ac := re.findall(r'^(lint-cmd|test-cmd|yes-always)\s*:\s*(\S.*)$', text(f'{r}/.aider.conf.yml'), re.M):
@@ -877,7 +909,7 @@ def projects():
                               "In a repo you cloned that is its authors' code: read it before trusting the folder")
         yield from autorun_rows(r, rr)
         for f in files(*(f'{r}/{x}' for x in INSTRUCTION_FILES), f'{r}/.cursor/rules/*', f'{r}/.claude/commands/*.md',
-                       f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md'):
+                       f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md', *opencode_code(f'{r}/.opencode')):
             yield from scan_text(text(f), tilde(f))
         yield from preapproval_warns(files(f'{r}/.claude/commands/*.md', f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md'))
 
