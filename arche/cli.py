@@ -74,6 +74,7 @@ def main(argv=None):
     p.add_argument('--json', action='store_true', help='with --scan: print JSON')
     p.add_argument('--only', action='append', metavar='CHECK', help='with --scan: run just this check (repeatable)')
     p.add_argument('--accept', action='store_true', help='with --scan: save the results as the new baseline')
+    p.add_argument('--monitor', action='store_true', help='one background pass: scan and notify about new findings (the timer runs this)')
     args = p.parse_args(argv)
     if args.action:
         fn, _, argname = ACTIONS[args.action]
@@ -82,6 +83,9 @@ def main(argv=None):
         return 0
     if args.selftest: return selftest()
     if args.scan: return scan(args)
+    if args.monitor:
+        from .monitor import run
+        return run()
     from .gui import gui
     gui()
     return 0
