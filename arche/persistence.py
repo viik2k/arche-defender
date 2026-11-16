@@ -243,16 +243,23 @@ def chromium_roots():
 
 
 def chromium_extensions():
-    """(browser, title, extension id, manifest) for every Chromium-family extension installed for this user."""
+    """(browser, title, extension id, manifest) for every Chromium-family extension installed for this user, also the ones
+    loaded from a folder (developer mode or --load-extension), which live outside Extensions/."""
     for name, root in chromium_roots():
-        for mf in files(f'{root}/*/Extensions/*/*/manifest.json'):
+        found = [(mf, Path(mf).parent.parent.name) for mf in files(f'{root}/*/Extensions/*/*/manifest.json')]
+        for pref in files(f'{root}/*/Preferences'):
+            st = {}   # Chrome keeps them in Secure Preferences, Brave and others in Preferences
+            for f in ('Preferences', 'Secure Preferences'): st.update((jsonf(f'{os.path.dirname(pref)}/{f}').get('extensions') or {}).get('settings') or {})
+            found += [(f'{v["path"]}/manifest.json', eid) for eid, v in st.items()
+                      if isinstance(v, dict) and v.get('location') in (4, 8) and os.path.isfile(f'{v.get("path")}/manifest.json')]
+        for mf, eid in found:
             j, d = jsonf(mf), os.path.dirname(mf)
             title = j.get('name', '?')
             if m := re.match(r'^__MSG_(.+)__$', title):
                 for loc in files(*(f'{d}/_locales/{x}/messages.json' for x in ('en', 'en_US', 'en_GB')))[:1]:
                     msgs = {k.lower(): v for k, v in jsonf(loc).items()}
                     title = msgs.get(m[1].lower(), {}).get('message') or title
-            yield name, title, Path(d).parent.name, j
+            yield name, title, eid, j
 
 
 def firefox_addons():

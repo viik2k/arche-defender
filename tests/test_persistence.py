@@ -1,7 +1,7 @@
 # Run: python3 tests/test_persistence.py (or pytest)
 import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.persistence import hooks, chromium_roots, install_cmds, git_runs, dns_rows
+from arche.persistence import hooks, chromium_roots, chromium_extensions, install_cmds, git_runs, dns_rows
 
 
 def test_hooks():
@@ -29,6 +29,23 @@ def test_custom_chromium_dirs():
     finally: os.environ.clear(); os.environ.update(old)
     assert extra == [('brave-vault', '~/.config/brave-vault'), ('work', '~/.var/app/x.y/config/work')], extra   # not the Electron app
 
+
+
+def test_unpacked_extensions():
+    import json
+    home, old = tempfile.mkdtemp(), dict(os.environ); atexit.register(shutil.rmtree, home, True)
+    prof, dev = f'{home}/.config/google-chrome/Default', f'{home}/.cache/.x'
+    for d in (f'{prof}/Extensions/aaaa/1.0', dev): os.makedirs(d)
+    open(f'{home}/.config/google-chrome/Local State', 'w').write('{}'); open(f'{prof}/Preferences', 'w').write('{}')
+    open(f'{prof}/Extensions/aaaa/1.0/manifest.json', 'w').write('{"name": "Store one"}')
+    open(f'{dev}/manifest.json', 'w').write('{"name": "Helper", "host_permissions": ["<all_urls>"]}')
+    open(f'{prof}/Secure Preferences', 'w').write(json.dumps({'extensions': {'settings': {
+        'bbbb': {'location': 4, 'path': dev}, 'cccc': {'location': 1, 'path': dev}, 'dddd': {'location': 8, 'path': f'{home}/gone'}}}}))
+    import arche.persistence as p
+    os.environ['HOME'], real = home, p.HOME; p.HOME = home
+    try: got = sorted((t, e) for n, t, e, _ in chromium_extensions() if n == 'Chrome')
+    finally: os.environ.clear(); os.environ.update(old); p.HOME = real
+    assert got == [('Helper', 'bbbb'), ('Store one', 'aaaa')], got
 
 
 def test_install_cmds():
@@ -67,4 +84,4 @@ def test_dns_rows():
 
 
 if __name__ == '__main__':
-    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_install_cmds(); print('ok')
+    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_install_cmds(); print('ok')
