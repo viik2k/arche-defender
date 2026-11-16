@@ -3,10 +3,10 @@
 # certificates trusted beyond the OS bundle (an added root can read all HTTPS traffic).
 # Also browsers started with flags that hand over cookies or weaken HTTPS, and Firefox security prefs turned down.
 # Which extensions are installed is persistence.py's 'Browser extensions'; --no-sandbox is hardening.py's 'App sandboxes'.
-import base64, json, os, re, shlex, shutil, sqlite3, tempfile
+import base64, json, os, re, shlex, shutil, sqlite3, tempfile, urllib.parse
 from pathlib import Path
 from .core import check, alert, warn, item, sh, have, text, files, jsonf, HOME
-from .persistence import CHROMIUM, chromium_roots
+from .persistence import CHROMIUM, chromium_roots, chromium_extensions
 from .hardening import argv
 
 FIREFOX = [f'{HOME}/.mozilla/firefox', f'{HOME}/.config/mozilla/firefox', f'{HOME}/.var/app/org.mozilla.firefox/.mozilla/firefox']
@@ -249,6 +249,52 @@ def policies():
     for browser, d in CHROMIUM_POLICY_DIRS.items():
         for f in files(f'{d}/managed/*.json', f'{d}/recommended/*.json'): yield from policy_rows(browser, f, jsonf(f))
     for f in files(*FIREFOX_POLICIES): yield from policy_rows('Firefox', f, jsonf(f).get('policies') or {})
+
+
+HIJACK_FIX = ('If you did not choose it, set it back in Settings (Search engine, On startup, Appearance > Home button) and remove '
+              'any extension or program you do not recognise: changing these is what browser hijackers and adware do.')
+
+
+def page_rows(who, what, url, custom=True):
+    """One row for a search engine or page a browser was set to: an alert when the link is dangerous, a list entry when it is not a built-in choice."""
+    from .intel import link_signs   # ponytail: intel imports this module, so import late
+    host = urllib.parse.urlsplit(url).hostname or url[:80]
+    if bad := link_signs(url.replace('{searchTerms}', 'x'))[0]:
+        yield alert(f'{who} {what} {host}: {bad[0]}', fix=HIJACK_FIX)
+    elif what.endswith('go to') and url.startswith('http://'):
+        yield warn(f'{who} {what} {host} without encryption', fix=HIJACK_FIX)
+    elif custom: yield item(f'{who} {what} {host}', fix=HIJACK_FIX)
+
+
+def hijack_rows(who, prefs):
+    """The default search engine (only when it is not one of the browser's built-in choices), pages opened at start, and the home page."""
+    d = (prefs.get('default_search_provider_data') or {}).get('mirrored_template_url_data') or {}
+    s = prefs.get('session') or {}
+    if isinstance(d.get('url'), str): yield from page_rows(f'{who}:', 'searches go to', d['url'], not d.get('prepopulate_id'))
+    for u in s.get('startup_urls') or [] if s.get('restore_on_startup') == 4 else []:   # 4 = open specific pages
+        if isinstance(u, str) and u: yield from page_rows(f'{who}:', 'start page is', u)
+    if isinstance(prefs.get('homepage'), str) and prefs['homepage'] and prefs.get('homepage_is_newtabpage') is False:
+        yield from page_rows(f'{who}:', 'home page is', prefs['homepage'])
+
+
+def override_rows(exts):
+    """Extensions whose manifest takes over the search engine, home page or start pages (chrome_settings_overrides)."""
+    for browser, title, _, m in exts:
+        o = m.get('chrome_settings_overrides') if isinstance(m, dict) else None
+        if not isinstance(o, dict): continue
+        who = f'{browser}: extension "{title}"'
+        if isinstance(sp := o.get('search_provider'), dict) and isinstance(sp.get('search_url'), str):
+            yield from page_rows(who, 'sends your searches to', sp['search_url'])
+        if isinstance(o.get('homepage'), str): yield from page_rows(who, 'sets the home page to', o['homepage'])
+        for u in o.get('startup_pages') or []:
+            if isinstance(u, str): yield from page_rows(who, 'sets the start page to', u)
+
+
+@check('Search and start page', 'Browsers')
+def search_and_start():
+    """What the address bar searches with and what opens at start: a changed one is the mark of a browser hijacker."""
+    for name, prof in chromium_profiles(): yield from hijack_rows(label(name, prof), jsonf(f'{prof}/Preferences'))
+    yield from override_rows(chromium_extensions())
 
 
 def subject(pem):

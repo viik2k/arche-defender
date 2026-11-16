@@ -171,3 +171,24 @@ class Unpacked(unittest.TestCase):
         self.assertEqual(rows, [(WARN, f'Chrome: extension "PDF Helper" is loaded from a folder, not from the store: {ext}'),
                                 (INFO, f'Chrome: extension "Mine" is loaded from {own} (your own project)'),
                                 (INFO, 'Chrome: extension "Bundled" is loaded from /usr/share')])
+
+
+class Hijack(unittest.TestCase):
+    def test_prefs(self):
+        tpl = lambda url, pid: {'default_search_provider_data': {'mirrored_template_url_data': {'url': url, 'prepopulate_id': pid}}}
+        rows = lambda prefs: [(s, t) for t, s, _ in browsers.hijack_rows('Brave', prefs)]
+        self.assertEqual(rows(tpl('https://search.brave.com/search?q={searchTerms}', 550)), [])
+        self.assertEqual(rows(tpl('https://searx.example/?q={searchTerms}', 0)), [(INFO, 'Brave: searches go to searx.example')])
+        self.assertEqual(rows(tpl('http://search.example/?q={searchTerms}', 0)), [(WARN, 'Brave: searches go to search.example without encryption')])
+        self.assertEqual(rows(tpl('https://www.google.com.search-hub.ru/?q={searchTerms}', 0))[0][0], ALERT)
+        start = {'session': {'restore_on_startup': 4, 'startup_urls': ['https://news.example/']}, 'homepage': 'https://home.example/',
+                 'homepage_is_newtabpage': False}
+        self.assertEqual(rows(start), [(INFO, 'Brave: start page is news.example'), (INFO, 'Brave: home page is home.example')])
+        self.assertEqual(rows({'session': {'restore_on_startup': 1, 'startup_urls': ['https://x.example/']}, 'homepage': 'https://y.example/'}), [])
+
+    def test_extension_overrides(self):
+        m = {'chrome_settings_overrides': {'search_provider': {'search_url': 'https://find.example/s?q={searchTerms}'},
+                                           'startup_pages': ['https://find.example/']}}
+        rows = [(s, t) for t, s, _ in browsers.override_rows([('Chrome', 'Better Search', 'a' * 32, m), ('Chrome', 'Plain', 'b' * 32, {})])]
+        self.assertEqual(rows, [(INFO, 'Chrome: extension "Better Search" sends your searches to find.example'),
+                                (INFO, 'Chrome: extension "Better Search" sets the start page to find.example')])
