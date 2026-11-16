@@ -28,6 +28,12 @@ def run(only=None):
     from .cli import pick, scan_all
     seen = jsonf(SEEN) or {}
     full = not only and time.time() - seen.get('full', 0) > WEEK
+    if not only:   # fresh threat-intel feeds daily, the way an AV updates its definitions; offline keeps yesterday's
+        from . import intel
+        if (age := intel.feed_age_days()) is None or age >= 1:
+            try: msg = intel.update()
+            except Exception as e: msg = f'Failed: {type(e).__name__}'
+            if 'Failed' in msg: print(f'threat intel update: {msg}', file=sys.stderr)
     names = pick(full, only)
     res = scan_all(load_baseline(), names)
     told = set(seen.get('told', []))
