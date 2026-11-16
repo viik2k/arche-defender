@@ -4,6 +4,7 @@
 # keys (never printing them), local model servers open to the network, and pickle model files that run code when loaded.
 import io, json, os, pickletools, re, zipfile
 from pathlib import Path
+from .hardening import argv
 from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check
 
 try: from .malware import match as _match
@@ -213,6 +214,27 @@ def claude_settings(s, where):
     if base and not re.match(r'^https://([\w-]+\.)*anthropic\.com', base):
         yield warn(f'Claude Code traffic goes through {redact(base)} ({where}): that host sees every prompt and key',
                    'Remove ANTHROPIC_BASE_URL unless you run that proxy yourself')
+
+
+AGENT_BYPASS = re.compile(r'^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo|--yes-always|'
+                          r'--permission-mode=bypassPermissions|--approval-mode=yolo|--sandbox=danger-full-access)$')
+AGENT_NAME = re.compile(r'claude|codex|gemini|aider|opencode|goose|cursor-agent|qwen|amp|crush|cline', re.I)
+
+
+@check('Running AI agents', FAM)
+def running():
+    # An agent started with its approvals off can do anything you can, and so can any prompt injection it reads.
+    found = set()
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        a = argv(pid)
+        prog = AGENT_NAME.search(' '.join(a[:2]))   # the agent itself, or node/python running its script
+        if not prog or pid == str(os.getpid()): continue
+        pairs = zip(a, a[1:] + [''])
+        bad = sorted({f for x, y in pairs for f in (x, f'{x}={y}') if AGENT_BYPASS.match(f)})
+        if bad: found.add((prog[0].lower(), ', '.join(bad)))
+    for name, bad in sorted(found):
+        yield warn(f'{name} is running with its permission checks off ({bad}): it can run any command without asking',
+                   'Fine for a throwaway container or VM; on your own account, restart it without that flag')
 
 
 @check('MCP servers', FAM)

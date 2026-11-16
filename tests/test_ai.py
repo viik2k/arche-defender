@@ -1,7 +1,8 @@
 # Run: python3 tests/test_ai.py (or pytest)
 import os, pickle, sys, tempfile, zipfile, collections
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.ai import model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
+import subprocess, time
+from arche.ai import running, model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
 
 
 class Evil:
@@ -33,5 +34,13 @@ def test_mcp():
     assert secret_kinds('{"env": {"KEY": "sk-ant-api03-' + 'a' * 40 + '"}}') == ['Anthropic key']
 
 
+def test_running():
+    p = subprocess.Popen(['claude', '-c', 'import time; time.sleep(5)', '--permission-mode', 'bypassPermissions'], executable=sys.executable)
+    try:
+        time.sleep(0.3)
+        assert any('claude is running' in r[0] and 'bypassPermissions' in r[0] for r in running()), list(running())
+    finally: p.kill()
+
+
 if __name__ == '__main__':
-    test_pickles(); test_text_rules(); test_mcp(); print('ok')
+    test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

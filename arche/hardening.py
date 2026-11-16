@@ -160,3 +160,30 @@ def setuid():
         if f.startswith(('/home/', '/tmp/', '/var/tmp/', '/dev/shm/')): yield alert(f'{kind} program in a user folder: {f}', f'Check it, then sudo chmod u-s,g-s {f}')
         else: yield item(f'{kind}: {f}')
     for l in lines(sh('getcap', '-r', '/usr/bin', '/usr/sbin', '/usr/local', '/opt', timeout=60)): yield item(f'capabilities: {l}')
+
+
+NO_SANDBOX = {'--no-sandbox': 'its sandbox off', '--disable-seccomp-filter-sandbox': 'its system-call filter off',
+              '--disable-web-security': 'web security (same-origin policy) off'}
+
+
+def argv(pid):
+    # Electron/Chromium rewrite their argv into one space-separated string; a shell's `-c` script stays one argument.
+    a = text(f'/proc/{pid}/cmdline').rstrip('\0').split('\0')
+    return a[0].split() if len(a) == 1 else a
+
+
+@check('App sandboxes', 'Protection')
+def sandboxes():
+    # A Chromium/Electron app (Discord, VS Code, Claude, Slack...) without its sandbox hands any page or message it renders
+    # a shot at your whole account. Flatpak apps keep the Flatpak sandbox, so they are skipped.
+    seen = {}
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        bad = [NO_SANDBOX[a] for a in argv(pid) if a in NO_SANDBOX]
+        if not bad or os.path.exists(f'/proc/{pid}/root/.flatpak-info'): continue
+        try: exe = os.readlink(f'/proc/{pid}/exe').removesuffix(' (deleted)')
+        except OSError: continue
+        seen.setdefault(exe, set()).update(bad)
+    for exe, why in sorted(seen.items()):
+        yield warn(f'{os.path.basename(exe)} runs with {" and ".join(sorted(why))} ({exe})',
+                   'Start it without --no-sandbox; for an AppImage or packaged Electron app, check its chrome-sandbox is root-owned '
+                   'and setuid (chmod 4755) or that unprivileged user namespaces are enabled')
