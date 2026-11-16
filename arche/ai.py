@@ -649,6 +649,7 @@ def chat_secrets():
 
 
 HF_HUB = os.path.join(os.environ.get('HF_HOME') or f'{HOME}/.cache/huggingface', 'hub')
+OLLAMA = ('~/.ollama/models', '/usr/share/ollama/.ollama/models', '/var/lib/ollama/.ollama/models')   # user install, then the system service's
 
 
 @check('Hub model code', FAM)
@@ -660,6 +661,16 @@ def hub_code():
         pys = files(f'{repo}/snapshots/*/*.py', f'{repo}/snapshots/*/*/*.py')
         if pys: yield item(f'Hugging Face {kind[:-1]} {name} ships Python code that runs when it is loaded with trust_remote_code')
         for p in pys: yield from scan_text(text(p), f'Hugging Face {name} {os.path.basename(p)}')
+    # Ollama models: the inventory makes a newly pulled one stand out, and a Modelfile's system prompt, template or seeded
+    # messages load into every chat with it, so they are scanned for injection like a skill.
+    for root in OLLAMA:
+        for mf in files(f'{root}/manifests/*/*/*/*'):
+            host, ns, model, tag = mf.split('/')[-4:]
+            name = f'{model}:{tag}' if (host, ns) == ('registry.ollama.ai', 'library') else f'{host}/{ns}/{model}:{tag}'
+            yield item(f'Ollama model {name}')
+            for layer in jsonf(mf).get('layers') or []:
+                if str(layer.get('mediaType', '')).rsplit('.', 1)[-1] in ('system', 'template', 'messages', 'prompt'):
+                    yield from scan_text(text(f'{root}/blobs/{str(layer.get("digest", "")).replace(":", "-")}'), f'Ollama model {name}')
 
 
 @check('AI model files', FAM, slow=True)
