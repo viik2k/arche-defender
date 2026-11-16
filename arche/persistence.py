@@ -147,8 +147,16 @@ def hooks():
         if field(f, 'Name') in sysbus: yield alert(f'{f} takes over the system D-Bus service {field(f, "Name")}: {field(f, "Exec")}',
                                                    f'Inspect it, then delete {f}')
         else: yield item(f'D-Bus service: {f} -> {field(f, "Exec")}')
+    tpl = ['/usr/share/git-core/templates']
     for scope in ('--system', '--global') if have('git') else ():
-        for k, v in git_runs(sh('git', 'config', scope, '--includes', '-l')): yield item(f'git {scope[2:]} {k}: {redact(v)[:150]}')
+        conf = sh('git', 'config', scope, '--includes', '-l')
+        for k, v in git_runs(conf): yield item(f'git {scope[2:]} {k}: {redact(v)[:150]}')
+        tpl += re.findall(r'^init\.templatedir=(.+)$', conf, re.M)
+    # git clone and git init copy the template's hooks into the new repo; post-checkout then runs during the clone itself
+    for h in files(*(f'{os.path.expanduser(d)}/hooks/*' for d in dict.fromkeys(tpl))):
+        if not h.endswith('.sample') and os.access(h, os.X_OK):
+            yield item(f'Every repo you clone or create gets this git hook: {tilde(h)}')
+            yield from ((t, sev, f'Read it; if you did not add it, delete {tilde(h)}') for t, sev, _ in scan_text(text(h), f'git template hook {tilde(h)}'))
     # A repo's own .git folder is not cloned, but one unpacked from a zip or tarball brings it along: its fsmonitor runs on every
     # `git status`, which shell prompts, editors and AI agents run by themselves the moment you open the folder.
     for r in repos() if have('git') else ():

