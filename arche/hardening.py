@@ -164,6 +164,28 @@ def ssh_client():
         yield from ssh_client_rows(text(f), f.replace(HOME, '~'))
 
 
+def kube_rows(t, where):
+    """kubeconfig: clusters reached with TLS checks off or over plain HTTP (a cluster-admin login anyone on the path can take),
+    and exec credential plugins, a command kubectl runs on every login."""
+    from .ai import redact, scan_text
+    for entry in re.split(r'\n\s*- ', t):   # ponytail: regexes over YAML list items; kubeconfigs are machine-written and regular
+        if not (srv := re.search(r'^\s*server:\s*["\']?([^"\'\s]+)', entry, re.M)): continue
+        if re.search(r'^\s*insecure-skip-tls-verify:\s*["\']?true', entry, re.M | re.I):
+            yield warn(f'{where} skips the TLS check for {srv[1]}: anyone on the path can pose as the cluster and take your login',
+                       'Remove insecure-skip-tls-verify and set certificate-authority-data to the cluster\'s CA')
+        elif srv[1].startswith('http://'):
+            yield warn(f'{where} reaches {srv[1]} over plain HTTP: your cluster login crosses the network unencrypted', 'Use the https:// address')
+    for cmd in re.findall(r'^\s*command:\s*["\']?([^"\'\n]+)', t, re.M):
+        yield item(f'{where} runs {redact(cmd.strip())[:120]} on every kubectl login (exec plugin)')
+        yield from scan_text(cmd, f'{where} exec plugin')
+
+
+@check('Kubernetes clients', 'Protection')
+def kube():
+    for f in files('~/.kube/config', '~/.kube/*.y*ml', *filter(None, os.environ.get('KUBECONFIG', '').split(':'))):
+        yield from kube_rows(text(f), f.replace(HOME, '~'))
+
+
 SECRET_FILES = ('~/.netrc', '~/.git-credentials', '~/.aws/credentials', '~/.config/gh/hosts.yml', '~/.docker/config.json',
                 '~/.kube/config', '~/.pgpass', '~/.npmrc', '~/.pypirc', '~/.config/rclone/rclone.conf', '~/.ssh/config',
                 '~/.claude.json', '~/.claude/.credentials.json', '~/.codex/auth.json', '~/.config/gcloud/credentials.db',

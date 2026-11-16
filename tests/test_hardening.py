@@ -34,5 +34,16 @@ def test_firewall_v6():
                         for p in ('1025-65535/tcp', '1025-65535/udp')], rows
 
 
+def test_kube_rows():
+    from arche.hardening import kube_rows
+    t = ('apiVersion: v1\nclusters:\n- cluster:\n    certificate-authority-data: AAAA\n    server: https://192.168.4.130:6443\n  name: k3s\n'
+         '- cluster:\n    insecure-skip-tls-verify: true\n    server: https://lab.example:6443\n  name: lab\n'
+         '- cluster:\n    server: http://10.0.0.9:8080\n  name: old\nusers:\n- name: eks\n  user:\n    exec:\n'
+         '      apiVersion: client.authentication.k8s.io/v1beta1\n      command: aws\n      args: [eks, get-token]\n')
+    rows = [(r[0].split(':')[0] if r[1] else r[0], r[1]) for r in kube_rows(t, '~/.kube/config')]
+    assert rows == [('~/.kube/config skips the TLS check for https', 1), ('~/.kube/config reaches http', 1),
+                    ('~/.kube/config runs aws on every kubectl login (exec plugin)', 0)], rows
+
+
 if __name__ == '__main__':
-    test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')
+    test_kube_rows(); test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')
