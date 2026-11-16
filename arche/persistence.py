@@ -196,6 +196,15 @@ def hooks():
         s = system.get(os.path.basename(f))
         if s and field(f, 'Exec') and field(f, 'Exec') != field(s, 'Exec'):
             yield item(f'Launcher {os.path.basename(f)} replaces the system one and runs: {field(f, "Exec")}')
+    # Links: the default browser gets every link you open (a change shows up as new), and a launcher in your home folder that
+    # claims a URL scheme can be started from a web page once you click through the browser's prompt
+    mine = {os.path.basename(f): f for f in files('~/.local/share/applications/*.desktop')}
+    if web := next(iter(re.findall(r'^x-scheme-handler/https=([^;\s]+)', text(os.path.expanduser('~/.config/mimeapps.list')), re.M)), ''):
+        yield item(f'Web links open with {web}: {field(mine.get(web) or system.get(web, ""), "Exec") or "launcher not found"}')
+    for n, f in mine.items():
+        if s := [m[17:] for m in field(f, 'MimeType').split(';') if m.startswith('x-scheme-handler/')]:
+            yield item(f'{", ".join(x + "://" for x in s)} links start {n} (a web page can open them): {field(f, "Exec")}')
+            yield from scan_text(field(f, 'Exec'), f'link handler {tilde(f)}')
 
 
 def dns_rows(st):
