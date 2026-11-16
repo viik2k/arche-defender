@@ -184,6 +184,11 @@ def judge_server(name, s, where):
     cmd = ' '.join(str(x) for x in [s.get('command', ''), *s.get('args', [])])
     if re.search(r'(^|/)(tmp|dev/shm|var/tmp)/|/Downloads/', cmd): yield alert(f'MCP server {name} ({where}) runs a program from a temp/download folder: {redact(cmd)[:160]}')
     yield from scan_text(cmd, f'MCP server {name} ({where})')
+    # Playwright and Chrome DevTools MCP keep a throwaway profile of their own unless told to attach to the browser you use
+    if re.search(r'playwright|chrome-devtools|puppeteer|browser', cmd, re.I) and re.search(
+            r'--(cdp-?endpoint|browser-?url|ws-?endpoint|auto-?connect|extension)\b|--user-?data-?dir[= ]\S*(google-chrome|chromium|BraveSoftware|microsoft-edge|vivaldi)', cmd, re.I):
+        yield warn(f'MCP server {name} ({where}) drives a browser you use yourself, with the sites it is signed in to: a web page it reads '
+                   'can tell the agent to act as you there', "Drop that option so it keeps its own profile, or point it at a separate one")
 
 
 def unpinned(s):
