@@ -14,6 +14,15 @@ GIT_RUNS = re.compile(r'^(core\.(sshcommand|hookspath|pager|askpass)|filter\..+\
 PM_HOOKS = ('/etc/dnf/libdnf5-plugins/actions.d/*.actions', '/etc/dnf/plugins/post-transaction-actions.d/*.action',
             '/etc/apt/apt.conf.d/*', '/etc/pacman.d/hooks/*.hook')
 OFF = ('true', 'false', 'yes', 'no', 'on', 'off', '1', '0', '')
+# A .pth file in a Python's site-packages runs its import lines at every start of that Python, so PyPI stealers persist there
+# (the litellm compromise, March 2026). Venvs, pipx and uv tools included; only the ones in your own and /usr/local site-packages are listed when clean.
+PTH = ('~/.local/lib/python3*/site-packages', '/usr/local/lib*/python3*/site-packages', '/usr/lib*/python3*/site-packages',
+       '~/.local/share/pipx/venvs/*/lib*/python3*/site-packages', '~/.local/share/uv/tools/*/lib*/python3*/site-packages',
+       '~/.virtualenvs/*/lib*/python3*/site-packages', '~/.pyenv/versions/*/lib*/python3*/site-packages',
+       '~/*conda3/lib/python3*/site-packages', '~/*conda3/envs/*/lib/python3*/site-packages',
+       *(f'~{"/*" * n}/{v}/lib*/python3*/site-packages' for n in (0, 1, 2, 3, 4) for v in ('.venv', 'venv')))
+PTH_BAD = re.compile(r'\b(exec|eval|compile)\s*\(|b64decode|base64|\bzlib\b|\bmarshal\b|subprocess|\bsocket\b|urllib|urlopen|requests\.|'
+                     r'os\.system|popen|codecs\.decode|\.ssh|environ\.copy|https?://')
 # Developer tools that run a start-up file of your own each time they start (shell code for mvn, Groovy/Kotlin for Gradle).
 DEV_RC = (('Maven', ('/etc/mavenrc', '~/.mavenrc')), ('Gradle', ('~/.gradle/init.gradle', '~/.gradle/init.gradle.kts', '~/.gradle/init.d/*')),
           ('R', ('~/.Rprofile',)), ('Julia', ('~/.julia/config/startup.jl',)), ('gdb', ('~/.gdbinit', '~/.config/gdb/gdbinit')),
@@ -190,8 +199,13 @@ def hooks():
     for f in files('~/.local/share/kio/servicemenus/*.desktop', '~/.local/share/kservices5/ServiceMenus/*.desktop'):
         for x in re.findall(r'^Exec=(.*)$', text(f), re.M): yield item(f'File-manager menu: {f} -> {x}')
     for f in files('~/.local/share/nautilus/scripts/*', '~/.local/share/nemo/actions/*.nemo_action'): yield item(f'File-manager script: {f}')
-    for f in files('~/.local/lib/python3*/site-packages/*.pth', '/usr/local/lib*/python3*/site-packages/*.pth'):
-        if any(l.startswith('import') for l in text(f).splitlines()): yield item(ver(f'Runs at every Python start: {f}'))
+    for f in files(*(f'{d}/*.pth' for d in PTH)):
+        if not (run := [l for l in text(f).splitlines() if l.startswith(('import ', 'import\t'))]): continue   # only import lines run
+        if m := PTH_BAD.search('\n'.join(run)):
+            yield alert(f'{tilde(f)} runs code at every start of that Python that unpacks, downloads or runs more ({m[0]}): {redact(run[0])[:120]}',
+                        'Delete it, reinstall the package it came with from a version before this, and rotate the keys and tokens on this PC')
+        elif f.startswith((HOME + '/.local/lib/', '/usr/local/')): yield item(ver(f'Runs at every Python start: {f}'))
+        yield from scan_text('\n'.join(run), f'Python start-up file {tilde(f)}')
     for f in files('~/.local/lib/python3*/site-packages/*customize.py', '/usr/local/lib*/python3*/site-packages/*customize.py'):
         yield item(ver(f'Runs at every Python start: {f}'))
     for tool, pats in DEV_RC:

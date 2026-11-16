@@ -17,8 +17,14 @@ def test_hooks():
         apps = f'{home}/.local/share/applications'; os.makedirs(apps); os.makedirs(f'{home}/.config')
         open(f'{home}/.config/mimeapps.list', 'w').write('[Default Applications]\nx-scheme-handler/https=evil.desktop\n')
         open(f'{apps}/evil.desktop', 'w').write('[Desktop Entry]\nExec=/tmp/b %u\nMimeType=text/html;x-scheme-handler/https;x-scheme-handler/zz;\n')
-        rows = [r[0] for r in hooks() if home in r[0] or r[0].startswith(('git global', 'Web links', 'https://')) or '.tpl' in r[0]]
+        sp = f'{home}/proj/.venv/lib/python3.12/site-packages'; os.makedirs(sp)
+        open(f'{sp}/evil.pth', 'w').write("import base64;exec(base64.b64decode('cHJpbnQoMSk='))\n")
+        open(f'{sp}/_virtualenv.pth', 'w').write('import _virtualenv\n'); open(f'{sp}/paths.pth', 'w').write('/opt/x\n')
+        full = list(hooks())
+        rows = [r[0] for r in full if home in r[0] or r[0].startswith(('git global', 'Web links', 'https://')) or '.tpl' in r[0]]
     finally: os.environ.clear(); os.environ.update(old)
+    pth = [(t, sev) for t, sev, _ in full if '.pth' in t]
+    assert len(pth) == 1 and pth[0][1] == 2 and 'evil.pth runs code at every start' in pth[0][0] and '(base64)' in pth[0][0], pth
     assert any('core.fsmonitor' in r for r in rows) and any('alias.x' in r for r in rows), rows
     assert not any('alias.lg' in r or 'User me' in r for r in rows) and any('ProxyCommand nc' in r for r in rows), rows
     tpl = [r.replace(home, '~') for r in rows if '.tpl' in r]
