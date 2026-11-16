@@ -439,5 +439,16 @@ def test_jupyter():
     assert sev("c.ServerApp.token = 'abc'\nc.ServerApp.allow_origin = 'https://colab.research.google.com'\n") == []
 
 
+def test_local_servers():
+    from arche import ai
+    real = ai.sh
+    ss = ('LISTEN 0 4096 0.0.0.0:5678 0.0.0.0:* users:(("node",pid=9,fd=3))\nLISTEN 0 4096 127.0.0.1:6333 0.0.0.0:* users:(("qdrant",pid=8,fd=4))\n'
+          'LISTEN 0 4096 0.0.0.0:3000 0.0.0.0:* users:(("grafana",pid=7,fd=5))\n')
+    ai.sh = lambda *a, **k: ss if a[0] == 'ss' else ''
+    try: rows = [(t, s) for t, s, _ in ai.local_servers()]
+    finally: ai.sh = real
+    assert rows == [('n8n (node) is reachable from your network on port 5678 with no password', 1), ('Qdrant (qdrant) listens on this PC only', 0)], rows
+
+
 if __name__ == '__main__':
-    test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

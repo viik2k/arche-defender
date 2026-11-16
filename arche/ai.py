@@ -65,9 +65,10 @@ FAKE_S, FAKE_B = re.compile(FAKE), re.compile(FAKE.encode())
 SCAN_EXT = {'.md', '.sh', '.bash', '.py', '.js', '.mjs', '.cjs', '.ts', '.json', '.ps1', '.toml', '.yaml', '.yml', '.txt', ''}
 PRUNE = {'node_modules', '.git', '.cache', '.local', '.var', '.steam', 'Steam', '.cargo', '.rustup', 'go', '.npm', '.nvm',
          'venv', '.venv', 'site-packages', 'target', 'dist', 'build', '.wine', 'Games', 'snap'}
-AI_PORTS = {11434: 'Ollama', 1234: 'LM Studio', 8188: 'ComfyUI', 7860: 'Gradio / Stable Diffusion WebUI', 7861: 'Gradio',
-            5001: 'KoboldCpp', 18789: 'OpenClaw gateway', 8080: 'llama.cpp / Open WebUI', 3000: 'Open WebUI', 9090: 'InvokeAI', 8000: 'vLLM'}
-AI_PROC = re.compile(r'openclaw|ollama|llama|lms|lm-studio|comfy|python|koboldcpp|vllm|invokeai|open-webui|uvicorn|node', re.I)
+AI_PORTS = {11434: 'Ollama', 1234: 'LM Studio', 8188: 'ComfyUI', 7860: 'Gradio / Stable Diffusion WebUI / Langflow', 7861: 'Gradio',
+            5001: 'KoboldCpp', 18789: 'OpenClaw gateway', 8080: 'llama.cpp / Open WebUI', 3000: 'Open WebUI / Flowise', 9090: 'InvokeAI', 8000: 'vLLM',
+            5678: 'n8n', 6333: 'Qdrant'}   # Langflow and Flowise had unauthenticated code-execution holes; Qdrant has no password by default
+AI_PROC = re.compile(r'openclaw|ollama|llama|lms|lm-studio|comfy|python|koboldcpp|vllm|invokeai|open-webui|uvicorn|node|n8n|qdrant|langflow|flowise', re.I)
 EDITORS = (('VS Code', '~/.vscode/extensions'), ('VS Code (Flatpak)', '~/.var/app/com.visualstudio.code/data/vscode/extensions'),
            ('VS Code Insiders', '~/.vscode-insiders/extensions'), ('VSCodium', '~/.vscode-oss/extensions'),
            ('VSCodium (Flatpak)', '~/.var/app/com.vscodium.codium/data/codium/extensions'), ('Cursor', '~/.cursor/extensions'),
