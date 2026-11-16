@@ -114,6 +114,15 @@ class Discord(unittest.TestCase):
         with mock.patch.object(browsers, 'DISCORD', {str(d): 'Discord (Flatpak)'}):
             self.assertEqual([(t, s) for t, s, _ in browsers.sign_ins()], [('Discord (Flatpak) keeps your sign-in token where any program can read it', INFO)])
 
+    def test_server_passwords(self):
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d)
+        (d / 'sitemanager.xml').write_text('<Server><Pass encoding="base64">aHVudGVyMg==</Pass></Server><Server><Pass encoding="crypt" pubkey="x">y</Pass></Server>')
+        (d / 'a.remmina').write_text('[remmina]\npassword=.\n'); (d / 'b.remmina').write_text('[remmina]\npassword=\n')
+        (d / 'c.remmina').write_text('[remmina]\npassword=Zm9vYmFy\n')
+        with mock.patch.multiple(browsers, DISCORD={}, FILEZILLA=(str(d),), REMMINA=(f'{d}/*.remmina',)):
+            self.assertEqual([(t, s) for t, s, _ in browsers.sign_ins()], [('FileZilla keeps 1 server password in plain text (sitemanager.xml)', WARN),
+                                                                           ('Remmina keeps 1 connection password that any program can decrypt', WARN)])
+
 
 class CopyQuery(unittest.TestCase):
     def test_reads_rows_still_in_the_wal(self):

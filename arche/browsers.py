@@ -205,6 +205,9 @@ DISCORD = {'~/.config/discord': 'Discord', '~/.config/discordcanary': 'Discord C
            '~/.var/app/com.discordapp.Discord/config/discord': 'Discord (Flatpak)', '~/.config/vesktop': 'Vesktop',
            '~/.var/app/dev.vencord.Vesktop/config/vesktop': 'Vesktop (Flatpak)', '~/.config/legcord': 'Legcord', '~/.config/WebCord': 'WebCord'}
 
+FILEZILLA = ('~/.config/filezilla', '~/.var/app/org.filezillaproject.Filezilla/config/filezilla')
+REMMINA = ('~/.local/share/remmina/*.remmina', '~/.var/app/org.remmina.Remmina/data/remmina/*.remmina')   # key beside them in remmina.pref
+
 
 def discord_token(b):
     """Whether Local Storage bytes hold a Discord token that needs no keyring to read (the value is never kept)."""
@@ -219,7 +222,8 @@ def discord_token(b):
 @check('Stealable app sign-ins', 'Privacy')
 def sign_ins():
     """App sign-ins any program can copy and replay to be logged in as you, past the password and 2FA (what
-    Discord-token stealers in cheats, cracked games and "free Nitro" tools take)."""
+    Discord-token stealers in cheats, cracked games and "free Nitro" tools take), and server passwords kept readable
+    (FileZilla without a master password, Remmina without the keyring)."""
     for d, app in DISCORD.items():
         for f in files(f'{d}/Local Storage/leveldb/*.ldb', f'{d}/Local Storage/leveldb/*.log'):
             try:
@@ -231,6 +235,14 @@ def sign_ins():
                                'encrypt it. Keep cheats, cracked games and "free Nitro" tools off this PC; if one ran, change your Discord '
                                'password, which signs out every copied token.')
                 break
+    for f in files(*(f'{d}/{x}' for d in FILEZILLA for x in ('sitemanager.xml', 'recentservers.xml'))):
+        if n := len(re.findall(r'<Pass(?: encoding="base64")?>[^<]', text(f))):   # with a master password: encoding="crypt"
+            yield warn(f'FileZilla keeps {n} server password{"s" * (n > 1)} in plain text ({os.path.basename(f)})',
+                       fix='Settings > Interface > Passwords: "Save passwords protected by a master password". Then change those '
+                           'server passwords: stealers copy this file first.')
+    n = sum(bool(re.search(r'^password=(?!\.?$).+', text(f), re.M)) for f in files(*REMMINA))   # "." = kept in the keyring
+    if n: yield warn(f'Remmina keeps {n} connection password{"s" * (n > 1)} that any program can decrypt',
+                     fix='Install the Remmina keyring plugin (remmina-plugins-secret; remmina-plugin-secret on Debian and Ubuntu), then re-save those connections so the passwords move into the keyring.')
 
 
 @check('Trusted certificates', 'Network')
