@@ -68,6 +68,7 @@ def scheduled():
         out = sh('systemctl', *user, 'list-timers', '--all', '-o', 'json')
         for t in json.loads(out or '[]'): yield item(f'Timer: {t["unit"]} -> {t["activates"]}')
     for l in lines(sh('crontab', '-l')): yield item(f'crontab: {l}')
+    for l in lines(sh('atq')) if have('atq') else (): yield item(f'at job (runs once; `at -c N` shows it): {l}')   # yours only; root's need root
     for f in files('/etc/crontab', '/etc/anacrontab', '/etc/cron.d/*'):
         for l in lines(text(f)): yield item(f'{f}: {l}')
     for f in files('/etc/cron.hourly/*', '/etc/cron.daily/*', '/etc/cron.weekly/*', '/etc/cron.monthly/*'): yield item(f'Script: {f}')
