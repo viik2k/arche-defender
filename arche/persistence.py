@@ -14,6 +14,10 @@ GIT_RUNS = re.compile(r'^(core\.(sshcommand|hookspath|pager|askpass)|filter\..+\
 PM_HOOKS = ('/etc/dnf/libdnf5-plugins/actions.d/*.actions', '/etc/dnf/plugins/post-transaction-actions.d/*.action',
             '/etc/apt/apt.conf.d/*', '/etc/pacman.d/hooks/*.hook')
 OFF = ('true', 'false', 'yes', 'no', 'on', 'off', '1', '0', '')
+# Developer tools that run a start-up file of your own each time they start (shell code for mvn, Groovy/Kotlin for Gradle).
+DEV_RC = (('Maven', ('/etc/mavenrc', '~/.mavenrc')), ('Gradle', ('~/.gradle/init.gradle', '~/.gradle/init.gradle.kts', '~/.gradle/init.d/*')),
+          ('R', ('~/.Rprofile',)), ('Julia', ('~/.julia/config/startup.jl',)), ('gdb', ('~/.gdbinit', '~/.config/gdb/gdbinit')),
+          ('LLDB', ('~/.lldbinit',)), ('irb', ('~/.irbrc',)), ('psql', ('~/.psqlrc',)))
 
 
 def git_runs(listing):
@@ -190,6 +194,14 @@ def hooks():
         if any(l.startswith('import') for l in text(f).splitlines()): yield item(ver(f'Runs at every Python start: {f}'))
     for f in files('~/.local/lib/python3*/site-packages/*customize.py', '/usr/local/lib*/python3*/site-packages/*customize.py'):
         yield item(ver(f'Runs at every Python start: {f}'))
+    for tool, pats in DEV_RC:
+        for f in files(*pats):
+            yield item(f'Runs each time {tool} starts: {tilde(f)}')
+            yield from scan_text(text(f), f'{tool} start-up file {tilde(f)}')
+            # gdb then runs the .gdbinit of whatever folder you debug in, a cloned repo's included
+            if re.search(r'^\s*(set\s+auto-load\s+safe-path|add-auto-load-safe-path)\s+/\s*$', text(f), re.M):
+                yield warn(f'{tilde(f)} lets gdb run the .gdbinit and Python scripts of any folder or program you debug',
+                           'Remove that line; allow only your own folders with add-auto-load-safe-path')
     if os.environ.get('PYTHONSTARTUP'): yield item(f'Runs at every interactive Python start: {os.environ["PYTHONSTARTUP"]}')
     system = {os.path.basename(f): f for d in APPS for f in files(f'{d}/*.desktop')}
     for f in files('~/.local/share/applications/*.desktop'):
