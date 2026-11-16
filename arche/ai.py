@@ -76,7 +76,7 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
              '~/.gemini/settings.json', '~/.config/Code/User/mcp.json', '~/.config/Code/User/settings.json', '~/.config/Cursor/User/settings.json',
              '~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
              '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json', '~/.continue/config.json',
-             '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json',
+             '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json', '~/.copilot/mcp-config.json', '~/.qwen/settings.json',
              '~/.config/zed/settings.json')
 PROJECT_MCP = ('.mcp.json', '.vscode/mcp.json', '.cursor/mcp.json', '.gemini/settings.json', '.roo/mcp.json', '.kiro/settings/mcp.json',
                '.amazonq/mcp.json', 'opencode.json', '.zed/settings.json')
@@ -86,7 +86,9 @@ MEMORY_FILES = ('~/.claude/CLAUDE.md', '~/.claude/memory/*.md', '~/.claude/proje
 CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
 SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.agents/skills', '~/.codex/skills', '~/.codex/prompts',
               '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules',
-              '~/.openclaw/skills', '~/.openclaw/workspace/skills')   # ClawHub skills: hundreds shipped stealers in 2026
+              '~/.openclaw/skills', '~/.openclaw/workspace/skills',   # ClawHub skills: hundreds shipped stealers in 2026
+              '~/.copilot/skills', '~/.copilot/agents', '~/.qwen/commands', '~/.qwen/agents')
+COPILOT_PLUGINS = '~/.copilot/installed-plugins'   # GitHub Copilot CLI plugins: skills, agents, hooks and MCP servers, as Claude Code's
 OPENCLAW = ('~/.openclaw/openclaw.json', '~/.clawdbot/clawdbot.json', '~/.moltbot/moltbot.json', '~/.openclaw/exec-approvals.json')
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.clinerules/*', '.roorules',
                      '.rules', '.github/copilot-instructions.md', '.github/instructions/*', '.github/prompts/*', '.github/chatmodes/*',
@@ -201,6 +203,12 @@ def market_src(m):
     return str(src.get('repo') or src.get('url') or src.get('path') or '?')
 
 
+
+def copilot_plugins():
+    """Each installed Copilot CLI plugin: the folder holding plugin.json (at its root, or in .claude-plugin/ or .github/plugin/)."""
+    pats = (f'{COPILOT_PLUGINS}/{d}{p}/plugin.json' for d in ('*', '*/*') for p in ('', '/.claude-plugin', '/.github/plugin'))
+    return sorted({re.sub(r'/(\.claude-plugin|\.github/plugin)$', '', os.path.dirname(m)) for m in files(*pats)})
+
 @check('AI plugins, skills and hooks', FAM)
 def plugins():
     st = jsonf(f'{HOME}/.claude/settings.json')
@@ -224,6 +232,7 @@ def plugins():
                     cmd = h.get('command') or h.get('url') or h.get('prompt') or ''
                     yield item(ver(f'Hook {ev} ({where}): {redact(cmd)[:160]}'))
                     yield from scan_text(cmd, f'Hook {ev} ({where})')
+    for d in copilot_plugins(): yield item(f'Copilot CLI plugin {os.path.basename(d)} ({tilde(d)}), code {fingerprint(d)}')
     codex = text(f'{HOME}/.codex/config.toml')
     if m := re.search(r'^notify\s*=\s*(.+)$', codex, re.M): yield item(f'Codex notify hook: {redact(m[1])[:160]}')
 
@@ -235,14 +244,15 @@ def contents():
     for root in SKILL_DIRS:
         if os.path.isdir(os.path.expanduser(root)): yield from scan_tree(os.path.expanduser(root), 'skill')
     for d in files(f'{CLAUDE_EXT}/*'): yield from scan_tree(d, 'Claude Desktop extension')
+    for d in copilot_plugins(): yield from scan_tree(d, 'Copilot CLI plugin')
     yield from preapproval_warns(files(*(f'{r}/{g}' for r in SKILL_DIRS for g in ('*/SKILL.md', 'SKILL.md', '*.md')),
-                                       *(f'~/.claude/plugins/cache/*/*/*/{g}' for g in ('skills/*/SKILL.md', 'commands/*.md', 'agents/*.md'))))
+                                       *(f'{r}/{g}' for r in ('~/.claude/plugins/cache/*/*/*', *copilot_plugins()) for g in ('skills/*/SKILL.md', 'commands/*.md', 'agents/*.md'))))
     # Agent memory and global instructions load into every session: an injection an agent was tricked into saving stays there.
     for f in files(*MEMORY_FILES): yield from scan_text(text(f), f'agent memory {tilde(f)}')
 
 
 APPROVALS_OFF = re.compile(r'--dangerously-skip-permissions|--permission-mode[= ]+["\']?bypassPermissions|'
-                          r'--dangerously-bypass-approvals-and-sandbox|--yolo\b|--allow-all-tools|--trust-all-tools')
+                          r'--dangerously-bypass-approvals-and-sandbox|--yolo\b|--allow-all(-tools)?\b|--trust-all-tools')   # --allow-all: Copilot CLI
 
 
 @check('AI agent permissions', FAM)
@@ -366,6 +376,7 @@ def mcp_servers():
     srcs = [(tilde(f), jsonc(f)) for f in files(*MCP_FILES)]
     srcs += [(re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', f), {'mcpServers': jsonf(f).get('mcpServers', jsonf(f))})
              for f in files('~/.claude/plugins/cache/*/*/*/.mcp.json')]
+    srcs += [(f'Copilot CLI plugin {os.path.basename(d)}', jsonf(f'{d}/.mcp.json')) for d in copilot_plugins()]
     for where, conf in srcs:
         for path, name, s in servers(conf):
             yield tilde(where + (f' > {path[-1]}' if path and path[-1] not in ('mcp',) and where.endswith('.claude.json') else '')), name, s
