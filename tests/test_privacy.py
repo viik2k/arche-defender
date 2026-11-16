@@ -227,3 +227,29 @@ class CorePattern(unittest.TestCase):
         self.assertEqual(rows('|/usr/bin/open-h'), [(ALERT, 'and it can be changed without root')])
         self.assertEqual(rows('|/usr/bin/mine-h'), [(ALERT, 'and it can be changed without root')])
         self.assertEqual(rows('|/usr/libexec/vendor-crash'), [(WARN, 'which is not a known crash reporter')])
+
+
+class CodeSecrets(unittest.TestCase):
+    def test_committed(self):
+        import subprocess
+        tok = 'ghp_' + 'aB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3kM5'
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        git = lambda *a: subprocess.run(['git', '-C', d, *a], capture_output=True, check=True)
+        git('init', '-q'); git('config', 'user.email', 't@t'); git('config', 'user.name', 't')
+        Path(d, 'tests').mkdir(); Path(d, 'tests/fixture.py').write_text(f'TOKEN = "{tok}"\n')
+        Path(d, 'deploy.sh').write_text(f'export GH_TOKEN={tok}\n')
+        Path(d, 'keygen.py').write_text("PEM = re.compile(r'-----BEGIN (RSA )?PRIVATE KEY-----')\n")
+        Path(d, 'firebase.js').write_text("const cfg = {apiKey: 'AIzaSyB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3k', authDomain: 'x.firebaseapp.com'}\n")
+        git('add', '.'); git('commit', '-q', '-m', 'x')
+        Path(d, 'later.sh').write_text(f'export GH_TOKEN={tok}\n')   # not committed
+        self.assertEqual(privacy.repo_secrets(d), {'deploy.sh': ['GitHub token']})
+        with mock.patch.object(privacy, 'repos', return_value=[d]):
+            self.assertEqual([s for _, s, _ in privacy.code_secrets()], [WARN])
+            git('remote', 'add', 'origin', 'git@github.com:me/x.git')
+            rows = list(privacy.code_secrets())
+        self.assertEqual([s for _, s, _ in rows], [ALERT])
+        self.assertTrue(rows[0][0].endswith('has GitHub token committed in deploy.sh, and the repo has a remote on github.com'), rows[0][0])
+        self.assertNotIn(tok, rows[0][0] + rows[0][2])
+        key = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\n'
+        self.assertEqual(privacy.committed_secrets(key), ['private key'])
+        self.assertEqual(privacy.committed_secrets('aws_access_key_id = AKIAIOSFODNN7EXAMPLE\nid2 = AKIAZ3MSJV4WWNKWW5FG\n'), ['AWS key'])

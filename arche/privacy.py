@@ -2,7 +2,7 @@
 # and the hardware that is plugged in or paired (a new "keyboard" can be a BadUSB).
 import base64, configparser, grp, json, os, re
 from .core import check, alert, warn, item, sh, have, text, files, HOME
-from .ai import secret_kinds
+from .ai import secret_kinds, repos
 from .browsers import copy_query
 from .malware import walk
 
@@ -381,6 +381,51 @@ def recovery_phrase(t):
         if len(run) in (12, 15, 18, 21, 24) and len(set(run)) >= len(run) - 1: return True
         run = []
     return False
+
+
+# Committed secrets: Sensitive files skips git trees, and a key in a pushed commit is the one that leaks.
+GIT_SECRET = (r'sk-ant-|sk-(proj-)?[A-Za-z0-9_-]{32}|gh[pousr]_[A-Za-z0-9]{30}|github_pat_|xox[abpr]-[0-9]|AIza[A-Za-z0-9_-]{30}|'
+              r'hf_[A-Za-z0-9]{30}|glpat-|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}')   # git grep -E: a fast first pass
+NOT_REAL = re.compile(r'(^|/)(tests?|specs?|__tests__|fixtures?|testdata|mocks?|examples?|samples?|docs?)/|[._-](test|spec|example|sample)s?\.', re.I)
+PEM_KEY = re.compile(r'-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----\r?\n(?:[\w-]+: [^\n]*\n)*\r?\n?[A-Za-z0-9+/=]{60,}')
+AWS_KEY = re.compile(r'(?<![A-Z0-9])AKIA(?!\w*EXAMPLE)[0-9A-Z]{16}(?![A-Z0-9])')
+PUBLIC_GIT = re.compile(r'(github\.com|gitlab\.com|codeberg\.org|bitbucket\.org|gitea\.com|sr\.ht)[:/]')
+
+
+def committed_secrets(body):
+    """Kinds of live key in one committed file: service keys and private keys with a body (not a regex or a header in docs)."""
+    kinds = [k for k in secret_kinds(body) if k not in ('JWT', 'bearer token')]   # tokens in examples and tests, mostly expired
+    if 'Google key' in kinds and re.search(r'authDomain|firebase', body): kinds.remove('Google key')   # Firebase web keys are public by design
+    return kinds + ['private key'] * bool(PEM_KEY.search(body) and not key_locked(body)) + ['AWS key'] * bool(AWS_KEY.search(body))
+
+
+def repo_secrets(r):
+    """{path: kinds} for files in r's last commit that hold a live key; test, example and docs paths are left out."""
+    out = {}
+    for l in sh('git', '-C', r, 'grep', '-I', '-l', '-E', GIT_SECRET, 'HEAD', '--', timeout=60).splitlines()[:200]:
+        path = l.partition(':')[2]   # HEAD:path
+        if path and not NOT_REAL.search(path) and (k := committed_secrets(sh('git', '-C', r, 'show', f'HEAD:{path}', timeout=10))):
+            out[path] = k
+    return out
+
+
+@check('Secrets in code repos', 'Privacy', slow=True)
+def code_secrets():
+    """API keys and private keys committed to your git repos (the last commit; a key deleted since is still in history)."""
+    for r in repos():
+        if not os.path.exists(f'{r}/.git') or not (found := repo_secrets(r)): continue
+        remote = next((u for u in sh('git', '-C', r, 'remote', '-v').split() if '/' in u or ':' in u), '')
+        kinds = sorted({k for ks in found.values() for k in ks})
+        where = f'{", ".join(sorted(found)[:3])}' + (f' and {len(found) - 3} more' if len(found) > 3 else '')
+        msg = f'{r.replace(HOME, "~")} has {" and ".join(kinds)} committed in {where}'
+        if PUBLIC_GIT.search(remote):
+            yield alert(f'{msg}, and the repo has a remote on {PUBLIC_GIT.search(remote)[1]}',
+                        fix='Revoke and replace each key now: anyone who has seen the repo has it, and deleting the file does not remove it '
+                            'from history. Then stop tracking it (git rm --cached, add it to .gitignore) and keep keys in an untracked .env.')
+        else:
+            yield warn(msg + (' (its remote is private or self-hosted)' if remote else ' (not pushed anywhere yet)'),
+                       fix='Stop tracking it before anything is pushed (git rm --cached, add it to .gitignore); the key stays in history, '
+                           'so replace it, or rewrite history with git filter-repo. Keep keys in an untracked .env.')
 
 
 @check('Sensitive files', 'Privacy')
