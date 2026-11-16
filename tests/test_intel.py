@@ -90,6 +90,17 @@ class Lookup(unittest.TestCase):
             self.assertEqual([t for t, _, _ in intel.extensions()], [f'Brave: Bad [{"a" * 32}] is on the list of known malicious extensions'])
 
 
+class Connections(unittest.TestCase):
+    def test_dns_and_hosts(self):
+        out = parsed('ip', '8.8.4.4\n45.9.148.1\n')
+        hosts = '127.0.0.1 localhost\n45.9.148.1 www.paypal.com paypal.com # added\n'
+        with mock.patch.object(intel, 'load', return_value=out), mock.patch.object(intel, 'feed_age_days', return_value=0), \
+             mock.patch.object(intel, 'peers', return_value=[]), mock.patch.object(intel, 'dns_servers', return_value=['192.168.1.1', '8.8.4.4']), \
+             mock.patch.object(intel, 'text', lambda p: hosts if p == '/etc/hosts' else ''):
+            self.assertEqual([t.split(':')[0] for t, _, _ in intel.connections()],
+                             ['Your DNS server 8.8.4.4 is listed by feed', '/etc/hosts sends www.paypal.com, paypal.com to 45.9.148.1, listed by feed'])
+
+
 class Links(unittest.TestCase):
     def test_signs(self):
         out = parsed('url', 'https://phish.example/Login/\nnot a url\n')

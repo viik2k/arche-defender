@@ -183,13 +183,26 @@ def peers():
         yield (m[1] if m else 'a process owned by another user'), ip.strip('[]'), port
 
 
+def dns_servers():
+    found = {x for l in sh('resolvectl', 'dns').splitlines() for x in l.partition(': ')[2].split()}
+    return sorted(found or re.findall(r'^nameserver\s+(\S+)', text('/etc/resolv.conf'), re.M))
+
+
 @check('Known-bad connections', 'Threats')
 def connections():
+    """Open connections, DNS servers and /etc/hosts entries that point at addresses on a threat feed."""
     if feed_age_days() is None and not CUSTOM.exists(): return
     for proc, ip, port in peers():
         hit = ip_hit(ip)
         if hit: yield alert(f'{proc} is connected to {ip}:{port}, listed by {hit}',
                             fix=f'Find it with: ss -tunp | grep {ip}. Stop the program, quarantine its file, then run a full scan.')
+    for ip in dns_servers():   # DNSChanger-style: a rogue resolver sends you to fake banking and update sites
+        if hit := ip_hit(ip): yield alert(f'Your DNS server {ip} is listed by {hit}: lookups can be answered with fake sites',
+                                         fix='Check the DNS setting in your network connection and in the router; set your ISP\'s or a known resolver, then change the router admin password.')
+    for l in text('/etc/hosts').splitlines():
+        f = l.partition('#')[0].split()
+        if len(f) > 1 and (hit := ip_hit(f[0])):
+            yield alert(f'/etc/hosts sends {", ".join(f[1:4])} to {f[0]}, listed by {hit}', fix='Remove that line with: sudoedit /etc/hosts')
 
 
 BROWSERS = {   # name -> globs of Chromium History or Firefox places.sqlite files (native and Flatpak)
