@@ -172,11 +172,28 @@ def hooks():
             yield item(f'Launcher {os.path.basename(f)} replaces the system one and runs: {field(f, "Exec")}')
 
 
+def dns_rows(st):
+    """Whether DNS lookups are encrypted, from `resolvectl status`: the global settings and the links that carry the default route."""
+    mode = re.search(r'resolv\.conf mode:\s*(\S+)', st)
+    if mode and mode[1] in ('foreign', 'uplink', 'missing'):
+        yield item('DNS lookups skip systemd-resolved (/etc/resolv.conf names the servers itself), so they go out unencrypted',
+                   'To encrypt them: sudo ln -sf ../run/systemd/resolve/stub-resolv.conf /etc/resolv.conf, then set DNSOverTLS in resolved.conf')
+        return
+    used = ' '.join(b for b in st.split('\n\n') if b.lstrip().startswith('Global') or '+DefaultRoute' in b)
+    if '+DNSOverTLS' in used: yield item('DNS over TLS: on')
+    elif 'DNSOverTLS=opportunistic' in used:
+        yield item('DNS over TLS: opportunistic (plain DNS whenever the server does not offer it, or something on the network blocks it)')
+    elif used: yield item('DNS lookups go out unencrypted: on public Wi-Fi the network can read them and answer with fake sites',
+                          'Set DNSOverTLS=opportunistic in /etc/systemd/resolved.conf ("yes" needs a resolver that supports it), '
+                          'or turn on secure DNS in your browser')
+
+
 @check('Network settings', 'Network')
 def network():
     for l in lines(text('/etc/hosts')): yield item('hosts: ' + ' '.join(l.split()))
     dns = {s for l in sh('resolvectl', 'dns').splitlines() for s in l.partition(': ')[2].split()}
     for s in sorted(dns or re.findall(r'^nameserver\s+(\S+)', text('/etc/resolv.conf'), re.M)): yield item(f'DNS server: {s}')
+    yield from dns_rows(sh('resolvectl', 'status'))
     for k in ('http_proxy', 'https_proxy', 'all_proxy', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY'):
         if os.environ.get(k): yield item(f'Proxy ({k}): {os.environ[k]}')
     kio = text(f'{HOME}/.config/kioslaverc')

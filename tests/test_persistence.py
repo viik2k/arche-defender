@@ -1,7 +1,7 @@
 # Run: python3 tests/test_persistence.py (or pytest)
 import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.persistence import hooks, chromium_roots, install_cmds, git_runs
+from arche.persistence import hooks, chromium_roots, install_cmds, git_runs, dns_rows
 
 
 def test_hooks():
@@ -57,5 +57,14 @@ def test_repo_git_folder():
     assert [s for _, s in rows] == [1, 0, 0] and 'evil.example' in rows[0][0] and 'post-checkout' in rows[2][0], rows
 
 
+def test_dns_rows():
+    g = 'Global\n         Protocols: LLMNR=resolve -mDNS {} DNSSEC=no\n  resolv.conf mode: {}\n\nLink 2 (eno1)\n    Protocols: +DefaultRoute -mDNS\n                    {}\n'
+    t = lambda *a: [r[0].split(':')[0] for r in dns_rows(g.format(*a))]
+    assert t('-DNSOverTLS', 'foreign', '-DNSOverTLS') == ['DNS lookups skip systemd-resolved (/etc/resolv.conf names the servers itself), so they go out unencrypted']
+    assert t('-DNSOverTLS', 'stub', '-DNSOverTLS') == ['DNS lookups go out unencrypted']
+    assert t('-DNSOverTLS', 'stub', 'DNSOverTLS=opportunistic') == ['DNS over TLS']
+    assert t('+DNSOverTLS', 'stub', '-DNSOverTLS') == ['DNS over TLS'] and list(dns_rows('')) == []
+
+
 if __name__ == '__main__':
-    test_hooks(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_install_cmds(); print('ok')
+    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_install_cmds(); print('ok')
