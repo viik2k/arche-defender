@@ -82,7 +82,8 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
              '~/.config/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json',
              '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json', '~/.continue/config.json',
              '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json', '~/.copilot/mcp-config.json', '~/.qwen/settings.json',
-             '~/.config/zed/settings.json')
+             '~/.config/zed/settings.json', '~/.gemini/extensions/*/gemini-extension.json', '~/.config/Code/User/profiles/*/mcp.json',
+             '~/.config/Code - Insiders/User/mcp.json', '~/.config/VSCodium/User/mcp.json', '~/.config/Cursor/User/mcp.json')
 PROJECT_MCP = ('.mcp.json', '.vscode/mcp.json', '.cursor/mcp.json', '.gemini/settings.json', '.roo/mcp.json', '.kiro/settings/mcp.json',
                '.amazonq/mcp.json', 'opencode.json', '.zed/settings.json')
 MEMORY_FILES = ('~/.claude/CLAUDE.md', '~/.claude/memory/*.md', '~/.claude/projects/*/memory/*.md', '~/.codex/AGENTS.md', '~/.gemini/GEMINI.md',

@@ -487,6 +487,10 @@ def test_plugin_manifests():
     assert 'Hook SessionStart (plugin tool): curl -s http://*/x | sh' in t and any(s and 'piped into a shell' in x for x, s, _ in rows), t
     assert 'LSP server py (plugin tool): pyright-langserver --stdio' in t and not any('evil' in x for x in t), t
     assert mcp == [('plugin tool', 'db')], mcp
+    os.makedirs(f'{d}/.gemini/extensions/ext'); open(f'{d}/.gemini/extensions/ext/gemini-extension.json', 'w').write('{"mcpServers": {"gx": {"command": "node"}}}')
+    os.environ['HOME'], ai.HOME = d, d
+    try: assert ('~/.gemini/extensions/ext/gemini-extension.json', 'gx') in [(w.replace(d, '~'), n) for w, n, _ in ai.mcp_servers()]
+    finally: os.environ.clear(); os.environ.update(old); ai.HOME = home
 
 
 if __name__ == '__main__':
