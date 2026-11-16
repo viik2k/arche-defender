@@ -154,3 +154,20 @@ class CopyQuery(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Unpacked(unittest.TestCase):
+    def test_rows(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        prof, ext, own = f'{d}/Default', f'{d}/dl/ext', f'{d}/code/myext/src'
+        for p in (prof, ext, own, f'{d}/code/myext/.git'): os.makedirs(p)
+        with open(f'{ext}/manifest.json', 'w') as f: json.dump({'name': 'PDF Helper'}, f)
+        with open(f'{prof}/Preferences', 'w') as f:
+            json.dump({'extensions': {'settings': {'a' * 32: {'location': 4, 'path': ext}, 'b' * 32: {'location': 8, 'path': f'{d}/gone'},
+                                                   'c' * 32: {'location': 4, 'path': own, 'manifest': {'name': 'Mine'}},
+                                                   'd' * 32: {'location': 8, 'path': '/usr/share', 'manifest': {'name': 'Bundled'}},
+                                                   'e' * 32: {'location': 1, 'path': 'eeee/1.0'}}}}, f)
+        rows = [(s, t) for t, s, _ in browsers.unpacked_rows('Chrome', prof)]
+        self.assertEqual(rows, [(WARN, f'Chrome: extension "PDF Helper" is loaded from a folder, not from the store: {ext}'),
+                                (INFO, f'Chrome: extension "Mine" is loaded from {own} (your own project)'),
+                                (INFO, 'Chrome: extension "Bundled" is loaded from /usr/share')])

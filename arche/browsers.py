@@ -43,10 +43,34 @@ def firefox_prefs(prof):
     return out
 
 
+def in_repo(p):
+    while p not in ('/', HOME, ''):
+        if os.path.exists(f'{p}/.git'): return True
+        p = os.path.dirname(p)
+    return False
+
+
+def unpacked_rows(name, prof):
+    """Extensions loaded from a folder (developer mode, location 4, or --load-extension, location 8): they are not under
+    Extensions/, so the inventory and the malicious-ID feed never see them, and store review never did."""
+    settings = {}   # Chrome can keep them in Secure Preferences, Brave and others in Preferences
+    for f in ('Preferences', 'Secure Preferences'): settings.update((jsonf(f'{prof}/{f}').get('extensions') or {}).get('settings') or {})
+    for eid, v in settings.items():
+        if not isinstance(v, dict) or v.get('location') not in (4, 8) or not os.path.isdir(path := v.get('path') or ''): continue
+        title = (v.get('manifest') or jsonf(f'{path}/manifest.json')).get('name') or eid
+        if os.access(path, os.W_OK) and not in_repo(path):
+            yield warn(f'{label(name, prof)}: extension "{title}" is loaded from a folder, not from the store: {path.replace(HOME, "~")}',
+                       fix='No store review ever saw it, and malware installs extensions this way to read your pages. If you did not '
+                           'load it yourself: remove it on the browser\'s extensions page, then delete the folder.')
+        else: yield item(f'{label(name, prof)}: extension "{title}" is loaded from {path.replace(HOME, "~")}' + (' (your own project)' if in_repo(path) else ''))
+
+
 @check('Browser protection', 'Browsers')
 def protection():
-    """Safe Browsing (blocks known phishing and malware sites), weakly stored saved passwords, and proxies set inside Firefox."""
+    """Safe Browsing (blocks known phishing and malware sites), weakly stored saved passwords, proxies set inside Firefox,
+    and extensions loaded from a folder instead of the store."""
     for name, prof in chromium_profiles():
+        yield from unpacked_rows(name, prof)
         sb = jsonf(f'{prof}/Preferences').get('safebrowsing') or {}
         if sb.get('enabled') is False:
             yield warn(f'{label(name, prof)}: Safe Browsing is off', fix='Settings > Privacy and security > Security: choose Standard or Enhanced protection.')
