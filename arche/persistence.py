@@ -1,11 +1,15 @@
 # Persistence and tampering sweep: the places malware hides to survive a reboot, plus what is exposed right now.
 import glob, json, os, re
 from pathlib import Path
-from .core import HOME, PKG, alert, item, ver, sh, text, lines, files, jsonf, check, owned
+from .core import HOME, PKG, alert, item, ver, sh, have, text, lines, files, jsonf, check, owned
 
 SENSITIVE = 'sudo|su|ssh|pkexec|passwd|doas|run0'
 RC_FILES = ('~/.bashrc', '~/.bash_profile', '~/.bash_login', '~/.profile', '~/.zshrc', '~/.zprofile', '~/.bashrc.d/*',
-            '~/.config/fish/config.fish', '~/.config/environment.d/*.conf', '/etc/environment')
+            '~/.zshenv', '~/.zlogin', '~/.bash_logout', '~/.xprofile', '~/.xinitrc', '~/.xsession', '~/.xsessionrc',
+            '~/.config/fish/config.fish', '~/.config/fish/conf.d/*.fish', '~/.config/environment.d/*.conf', '/etc/environment')
+APPS = ('/usr/share/applications', '/usr/local/share/applications', '/var/lib/flatpak/exports/share/applications',
+        '~/.local/share/flatpak/exports/share/applications')
+GIT_RUNS = re.compile(r'^(core\.(sshcommand|hookspath|pager|askpass)|filter\..+\.(clean|smudge|process))$')
 
 
 @check('Running programs', 'Processes')
@@ -90,6 +94,42 @@ def hijack():
             if 'RUN' in l: yield item(f'{f}: {l}')
 
 
+def field(f, k): return next(iter(re.findall(rf'^{k}=(.*)$', text(f), re.M)), '').strip()
+
+
+@check('Command hooks', 'Persistence')
+def hooks():
+    """Lesser-known places that run a command for you: D-Bus activation, git, the SSH client, file-manager menus,
+    Python start-up and app launchers that replace the system's own."""
+    from .ai import redact   # git and ssh values can hold tokens
+    sysbus = {field(f, 'Name') for f in files('/usr/share/dbus-1/services/*.service')}
+    for f in files('~/.local/share/dbus-1/services/*.service'):
+        if field(f, 'Name') in sysbus: yield alert(f'{f} takes over the system D-Bus service {field(f, "Name")}: {field(f, "Exec")}',
+                                                   f'Inspect it, then delete {f}')
+        else: yield item(f'D-Bus service: {f} -> {field(f, "Exec")}')
+    for scope in ('--system', '--global') if have('git') else ():
+        for k, v in re.findall(r'^([^=\n]+)=(.*)$', sh('git', 'config', scope, '--includes', '-l'), re.M):
+            if GIT_RUNS.match(k) or (k == 'core.fsmonitor' and v.lower() not in ('true', 'false')) or (
+                    k.startswith('alias.') or k.endswith('.helper')) and v.startswith('!'):
+                yield item(f'git {scope[2:]} {k}: {redact(v)[:150]}')
+    for f in files('~/.ssh/config', '~/.ssh/config.d/*', '/etc/ssh/ssh_config', '/etc/ssh/ssh_config.d/*'):
+        for l in lines(text(f)):
+            if re.match(r'(?i)(ProxyCommand|LocalCommand|KnownHostsCommand)\b|Match\s.*\bexec\b', l): yield item(f'{f}: {redact(l)[:150]}')
+    for f in files('~/.local/share/kio/servicemenus/*.desktop', '~/.local/share/kservices5/ServiceMenus/*.desktop'):
+        for x in re.findall(r'^Exec=(.*)$', text(f), re.M): yield item(f'File-manager menu: {f} -> {x}')
+    for f in files('~/.local/share/nautilus/scripts/*', '~/.local/share/nemo/actions/*.nemo_action'): yield item(f'File-manager script: {f}')
+    for f in files('~/.local/lib/python3*/site-packages/*.pth', '/usr/local/lib*/python3*/site-packages/*.pth'):
+        if any(l.startswith('import') for l in text(f).splitlines()): yield item(ver(f'Runs at every Python start: {f}'))
+    for f in files('~/.local/lib/python3*/site-packages/*customize.py', '/usr/local/lib*/python3*/site-packages/*customize.py'):
+        yield item(ver(f'Runs at every Python start: {f}'))
+    if os.environ.get('PYTHONSTARTUP'): yield item(f'Runs at every interactive Python start: {os.environ["PYTHONSTARTUP"]}')
+    system = {os.path.basename(f): f for d in APPS for f in files(f'{d}/*.desktop')}
+    for f in files('~/.local/share/applications/*.desktop'):
+        s = system.get(os.path.basename(f))
+        if s and field(f, 'Exec') and field(f, 'Exec') != field(s, 'Exec'):
+            yield item(f'Launcher {os.path.basename(f)} replaces the system one and runs: {field(f, "Exec")}')
+
+
 @check('Network settings', 'Network')
 def network():
     for l in lines(text('/etc/hosts')): yield item('hosts: ' + ' '.join(l.split()))
@@ -121,8 +161,9 @@ def remote():
         if len(f) < 7 or not f[2].isdigit(): continue
         if f[2] == '0' and f[0] != 'root': yield alert(f'Second root account (uid 0): {f[0]}')
         elif int(f[2]) >= 1000 and not f[6].endswith(('nologin', 'false')): yield item(f'Login account: {f[0]} ({f[6]})')
-    for m in sh('getent', 'group', 'wheel').strip().rpartition(':')[2].split(','):
-        if m: yield item(f'Admin (wheel): {m}')
+    for g in ('wheel', 'sudo', 'admin'):   # Fedora/Arch, Debian/Ubuntu, old Ubuntu
+        for m in sh('getent', 'group', g).strip().rpartition(':')[2].split(','):
+            if m: yield item(f'Admin ({g}): {m}')
 
 
 CHROMIUM = (('Chrome', 'google-chrome', 'com.google.Chrome'), ('Chromium', 'chromium', 'org.chromium.Chromium'),

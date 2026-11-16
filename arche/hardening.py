@@ -113,7 +113,7 @@ def login():
 
 @check('SSH server', 'Protection')
 def sshd():
-    active = sh('systemctl', 'is-active', 'sshd').strip() == 'active'
+    active = 'active' in sh('systemctl', 'is-active', 'sshd', 'ssh').split()   # 'ssh' on Debian/Ubuntu
     conf = '\n'.join(text(f) for f in ['/etc/ssh/sshd_config', *files('/etc/ssh/sshd_config.d/*.conf')])
     if not active: return
     yield item('sshd is running')
