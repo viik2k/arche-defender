@@ -1,6 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
 import unittest
+from datetime import datetime, timezone
 from unittest import mock
 from arche import logs, intel
 from arche.core import ALERT, WARN, INFO
@@ -84,3 +85,18 @@ class Installed(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Snaps(unittest.TestCase):
+    def test_changes(self):
+        out = """ID   Status  Spawn                 Ready                 Summary
+1    Done    2026-10-01T09:00:00Z  2026-10-01T09:01:00Z  Initialize system state
+7    Done    2026-10-02T09:00:00Z  2026-10-02T09:01:00Z  Install "old" snap
+9    Done    2026-11-15T10:00:00Z  2026-11-15T10:01:00Z  Install "vlc" snap
+10   Done    2026-11-15T11:00:00Z  2026-11-15T11:01:00Z  Install "tool" snap from file "/home/u/tool.snap"
+11   Doing   2026-11-16T08:00:00Z  -                     Remove "vlc" snap
+12   Done    2026-11-16T09:00:00Z  2026-11-16T09:01:00Z  Refresh "core22" snap
+"""
+        cut = datetime(2026, 11, 10, tzinfo=timezone.utc).timestamp()
+        self.assertEqual([t for t, _, _ in logs.snap_changes(out, cut)],
+                         ['Snap installed vlc', 'Snap installed tool from a file, without a store signature', 'Snap removed vlc'])

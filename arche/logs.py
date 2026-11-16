@@ -4,7 +4,8 @@
 # Who is in wheel right now is persistence.py; this module reports what changed and when.
 import json, re, time
 from collections import defaultdict
-from .core import check, alert, warn, item, sh
+from datetime import datetime
+from .core import check, alert, warn, item, sh, have
 from . import intel
 
 DAYS, BURST, WINDOW = 7, 5, 600
@@ -114,7 +115,7 @@ ROUTINE = re.compile(r'\b(upgrade|update|distro-sync|makecache|check-upgrade|off
 
 @check('Software installed this week', 'Activity')
 def installed():
-    """dnf transactions and Flatpak apps installed or removed in the last week (routine upgrades left out)."""
+    """dnf transactions, Flatpak apps and snaps installed or removed in the last week (routine upgrades left out)."""
     cut = time.time() - DAYS * 86400
     try: tx = json.loads(sh('dnf', '-C', '-q', 'history', 'list', '--json', timeout=60) or '[]')
     except ValueError: tx = []
@@ -127,3 +128,14 @@ def installed():
         f = l.split('\t')
         if len(f) >= 4 and f[1].startswith('app/') and f[0] in ('deploy install', 'uninstall'):
             yield item(f'Flatpak {"installed" if f[0] != "uninstall" else "removed"} {f[1].split("/")[1]} from {f[2] or "?"} ({f[3]})')
+    if have('snap'): yield from snap_changes(sh('snap', 'changes', '--abs-time', timeout=30), cut)
+
+
+def snap_changes(out, cut):
+    """`snap changes --abs-time`: ID Status Spawn Ready Summary."""
+    for l in out.splitlines()[1:]:
+        f = l.split(None, 4)
+        if len(f) < 5 or not (m := re.match(r'(Install|Remove) "([^"]+)" snap( from file)?', f[4])): continue
+        try: t = datetime.fromisoformat(f[2].replace('Z', '+00:00')).timestamp()
+        except ValueError: continue
+        if t >= cut: yield item(f'Snap {"installed" if m[1] == "Install" else "removed"} {m[2]}' + (' from a file, without a store signature' if m[3] else ''))
