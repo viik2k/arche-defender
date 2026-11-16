@@ -83,7 +83,7 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
              # Cline, Roo Code and Kilo Code keep theirs in the extension's storage, in whichever editor (Code, Cursor, Windsurf, VSCodium, Flatpak)
              '~/.config/*/User/globalStorage/*/settings/*mcp_settings.json', '~/.var/app/*/config/*/User/globalStorage/*/settings/*mcp_settings.json',
              '~/.config/anythingllm-desktop/storage/plugins/anythingllm_mcp_servers.json', '~/.config/Jan/data/mcp_config.json',
-             '~/.local/share/Jan/data/mcp_config.json', '~/.continue/config.json',
+             '~/.local/share/Jan/data/mcp_config.json', '~/.continue/config.json', '~/.continue/mcpServers/*.json',
              '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json', '~/.copilot/mcp-config.json', '~/.qwen/settings.json',
              '~/.config/zed/settings.json', '~/.gemini/extensions/*/gemini-extension.json', '~/.config/Code/User/profiles/*/mcp.json',
              '~/.config/Code - Insiders/User/mcp.json', '~/.config/VSCodium/User/mcp.json', '~/.config/Cursor/User/mcp.json')
@@ -552,6 +552,25 @@ def goose_extensions(t):
     return {n: s for n, s in out.items() if not s.pop('off', False) and ('command' in s or 'url' in s)}   # builtins have neither
 
 
+def continue_servers(t):
+    """{name: server} from Continue's YAML (config.yaml, or a file in .continue/mcpServers/): the list under mcpServers:."""
+    out, cur, key = {}, None, None
+    block = re.search(r'^mcpServers:[ \t]*\n((?:[ \t].*\n?|\n)*)', t, re.M)
+    ls = (block[1] if block else '').splitlines()
+    ind = next((len(m[1]) for l in ls if (m := re.match(r'^(\s*)- ', l))), 0)
+    for l in ls:
+        if (m := re.match(r'^(\s*)- (.*)$', l)) and len(m[1]) == ind:   # a new server; its first key sits on the dash line
+            cur, key, l = out.setdefault(f'#{len(out) + 1}', {'args': [], 'env': {}}), None, ' ' * (ind + 2) + m[2]
+        if cur is None: continue
+        if m := re.match(rf'^ {{{ind + 2}}}(\w+):\s*(.*)$', l):
+            key, v = m[1], m[2].strip().strip('\'"')
+            if key in ('name', 'command', 'url'): cur[key] = v
+            elif key == 'args' and v.startswith('['): cur['args'] = [x.strip().strip('\'"') for x in v[1:-1].split(',') if x.strip()]
+        elif key == 'args' and (m := re.match(r'^\s*- (.*)$', l)): cur['args'].append(m[1].strip().strip('\'"'))
+        elif key == 'env' and (m := re.match(r'^\s+(\w+):', l)): cur['env'][m[1]] = '...'   # names only: values are tokens
+    return {s.pop('name', k): s for k, s in out.items() if 'command' in s or 'url' in s}
+
+
 def mcp_servers():
     """(where, name, server) for every MCP server configured in an agent, a plugin, a Desktop extension or Codex."""
     srcs = [(tilde(f), jsonc(f)) for f in files(*MCP_FILES)]
@@ -573,6 +592,8 @@ def mcp_servers():
         url = re.search(r'^url\s*=\s*"([^"]*)"', body, re.M)
         yield '~/.codex/config.toml', name, {'command': cmd[1] if cmd else '', 'args': args, 'url': url[1] if url else ''}
     for name, s in goose_extensions(text(f'{HOME}/.config/goose/config.yaml')).items(): yield GOOSE, name, s
+    for f in files('~/.continue/config.yaml', '~/.continue/mcpServers/*.yaml', '~/.continue/mcpServers/*.yml'):
+        for name, s in continue_servers(text(f)).items(): yield tilde(f), name, s
 
 
 @check('MCP servers', FAM)
@@ -799,6 +820,10 @@ def autorun_rows(r, rr):
             c = ' '.join(map(str, c.values() if isinstance(c, dict) else c if isinstance(c, list) else [c]))
             yield item(f'{rr}{f[len(r):]} runs on this PC, outside the container, when you open it in a dev container: {redact(c)[:120]}')
             yield from scan_text(c, f'{rr}{f[len(r):]} initializeCommand')
+    # Continue loads the MCP servers in a workspace's .continue/mcpServers (YAML, or JSON copied from another agent) along with your own
+    for f in files(f'{r}/.continue/mcpServers/*'):
+        for name, s in (continue_servers(text(f)) if f.endswith(('.yaml', '.yml')) else {n: x for _, n, x in servers(jsonc(f))}).items():
+            yield from judge_server(name, s, f'project {rr}, Continue {os.path.basename(f)}')
     # aider reads .aider.conf.yml at the repo root: lint-cmd runs after every edit (auto-lint is on), test-cmd with auto-test, yes-always skips its prompts
     # ponytail: one-line values only; a YAML list under lint-cmd is missed
     if ac := re.findall(r'^(lint-cmd|test-cmd|yes-always)\s*:\s*(\S.*)$', text(f'{r}/.aider.conf.yml'), re.M):

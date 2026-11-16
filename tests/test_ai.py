@@ -543,7 +543,8 @@ def test_wide_terminal():
 def test_vet_repo():
     import arche.ai as ai
     d = tmp()
-    for x in ('.vscode', '.devcontainer', '.git/hooks', '.cursor/rules'): os.makedirs(f'{d}/{x}')
+    for x in ('.vscode', '.devcontainer', '.git/hooks', '.cursor/rules', '.continue/mcpServers'): os.makedirs(f'{d}/{x}')
+    open(f'{d}/.continue/mcpServers/db.yaml', 'w').write('name: db\nmcpServers:\n  - name: sqlite\n    command: npx\n    args:\n      - -y\n      - mcp-sqlite\n')
     open(f'{d}/.vscode/tasks.json', 'w').write('{"tasks": [{"command": "make", "runOptions": {"runOn": "folderOpen"}}]}')
     open(f'{d}/.devcontainer/devcontainer.json', 'w').write('{"initializeCommand": ["sh", "-c", "id"], "privileged": true}')
     open(f'{d}/docker-compose.yml', 'w').write('services:\n  a:\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n      - ./x:/x\n')
@@ -556,7 +557,8 @@ def test_vet_repo():
                  '0 R/.devcontainer/devcontainer.json runs on this PC, outside the container, when you open it in a dev container: sh -c id',
                  '1 R/.git/config makes git run a command (core.fsmonitor): ./fsm.sh', '1 R/.git/hooks/pre-commit: a git hook',
                  '1 R/.cursor/rules/a.mdc: prompt-injection phrasing', '1 R/.devcontainer/devcontainer.json: a container started from it runs privileged',
-                 '1 R/docker-compose.yml: a container started from it can drive the container engine'):
+                 '1 R/docker-compose.yml: a container started from it can drive the container engine',
+                 '0 MCP server sqlite (project R, Continue db.yaml): npx -y mcp-sqlite'):
         assert want in t, (want, t)
     assert 'sample' not in t and 'compose.yaml' not in t, t
 
@@ -583,5 +585,16 @@ def test_more_mcp_paths():
     assert 'MCP server kilo-x' in t and 'MCP server allm-x' in t, t
 
 
+def test_continue_servers():
+    from arche.ai import continue_servers
+    y = ('models:\n  - name: m\n    provider: x\nmcpServers:\n  - name: SQLite MCP\n    command: npx\n    args:\n      - "-y"\n      - mcp-sqlite\n'
+         '    env:\n      TOKEN: abc\n  - command: uvx\n    name: git\n    args: [mcp-server-git, --repository, .]\n'
+         '  - name: remote\n    type: streamable-http\n    url: https://example.com/mcp\n  - name: nothing\nrules:\n  - be nice\n')
+    assert continue_servers(y) == {'SQLite MCP': {'command': 'npx', 'args': ['-y', 'mcp-sqlite'], 'env': {'TOKEN': '...'}},
+                                   'git': {'command': 'uvx', 'args': ['mcp-server-git', '--repository', '.'], 'env': {}},
+                                   'remote': {'url': 'https://example.com/mcp', 'args': [], 'env': {}}}, continue_servers(y)
+    assert continue_servers('name: x\n') == {}
+
+
 if __name__ == '__main__':
-    test_more_mcp_paths(); test_lan_http_mcp(); test_vet_repo(); test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_continue_servers(); test_more_mcp_paths(); test_lan_http_mcp(); test_vet_repo(); test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
