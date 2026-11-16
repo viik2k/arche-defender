@@ -57,5 +57,12 @@ def test_polkit():
     assert [s for _, s in rows] == [1, 0, 1] and rows[0][0].startswith('polkit rule ~/a.rules lets') and 'empower' in rows[2][0], rows
 
 
+def test_browsed():
+    from arche.hardening import browsed_rows
+    assert [r[1] for r in browsed_rows(True, '# x\nBrowseRemoteProtocols dnssd cups\n')] == [1]
+    assert list(browsed_rows(True, 'BrowseRemoteProtocols cups\nBrowseRemoteProtocols none\n')) == []
+    assert list(browsed_rows(False, 'BrowseRemoteProtocols cups\n')) == [] and list(browsed_rows(True, '')) == []
+
+
 if __name__ == '__main__':
-    test_polkit(); test_kube_rows(); test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')
+    test_browsed(); test_polkit(); test_kube_rows(); test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')

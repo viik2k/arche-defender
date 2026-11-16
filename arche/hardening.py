@@ -11,6 +11,16 @@ def plain_swap(swaps, kind=lambda d: sh('lsblk', '-n', '-s', '-o', 'TYPE', d).sp
     return [d for d in re.findall(r'^(/dev/\S+)\s+partition', swaps, re.M) if not d.startswith('/dev/zram') and 'crypt' not in kind(d)]
 
 
+def browsed_rows(running, conf):
+    """cups-browsed taking printers that any machine on the network announces over the old CUPS protocol (UDP 631): the 2024
+    CVE-2024-47176 chain used that to add a fake printer whose driver line runs a command the next time you print."""
+    m = re.findall(r'^\s*BrowseRemoteProtocols\s+(.*)$', conf, re.M | re.I)
+    if running and m and re.search(r'\bcups\b', m[-1], re.I):
+        yield warn(f'cups-browsed adds printers any machine on your network announces (BrowseRemoteProtocols {m[-1].strip()}): '
+                   'a fake one can run a command when you print', 'Set BrowseRemoteProtocols none (or dnssd) in /etc/cups/cups-browsed.conf, '
+                   'then sudo systemctl restart cups-browsed; if you never print to network printers, sudo systemctl disable --now cups-browsed')
+
+
 @check('Security posture', 'Protection')
 def security():
     active = lambda u: sh('systemctl', 'is-active', u).strip() == 'active'
@@ -36,6 +46,7 @@ def security():
     if 'enabled' in sb: yield item(sb)
     elif sb: yield warn('Secure Boot is disabled: a bootkit or unsigned kernel module can load before the OS',
                         'Enable Secure Boot in firmware setup (enrol the NVIDIA/akmods key with mokutil first)')
+    yield from browsed_rows(active('cups-browsed'), text('/etc/cups/cups-browsed.conf'))   # ponytail: an explicit setting only; older builds default to cups
     lock = re.search(r'\[(\w+)\]', text('/sys/kernel/security/lockdown'))
     if lock: yield item(f'Kernel lockdown: {lock[1]}')
     plain = []
