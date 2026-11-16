@@ -524,6 +524,9 @@ def keys():
                    'Load keys from the environment or a keyring (secret-tool); at least chmod 600 the file')
 
 
+ANY_ORIGIN = re.compile(r'OLLAMA_ORIGINS=["\']?(?:[^"\'\s]*,)?(\*|https?://\*)(?=[,"\'\s]|$)')
+
+
 @check('Local AI servers', FAM)
 def local_servers():
     for l in sh('ss', '-tlnpH').splitlines():
@@ -537,6 +540,11 @@ def local_servers():
         if re.match(r'^(127\.|\[?::1\]?$)', addr) or addr.endswith('%lo'): yield item(f'{who} listens on this PC only')
         else: yield warn(f'{who} is reachable from your network on port {port} with no password',
                          'Bind it to 127.0.0.1 (Ollama: OLLAMA_HOST=127.0.0.1) or firewall the port')
+    # ponytail: the unit's Environment= and environment.d; an EnvironmentFile= or a shell export is not read
+    env = ' '.join(sh('systemctl', *u, 'show', 'ollama', '-p', 'Environment', '--value') for u in ([], ['--user']))
+    if ANY_ORIGIN.search(env + ' '.join(text(f) for f in files('~/.config/environment.d/*.conf', '/etc/environment'))):
+        yield warn('Ollama answers any website (OLLAMA_ORIGINS=*): a page you open can run your models, pull new ones and delete them',
+                   'Set OLLAMA_ORIGINS to only the apps that need it (such as chrome-extension://<id>), or remove it')
 
 
 @check('Editor extensions', FAM)

@@ -399,5 +399,16 @@ def test_goose():
     assert perm == ['Goose runs every tool without asking (GOOSE_MODE: auto)'], perm
 
 
+def test_ollama_origins():
+    from arche import ai
+    real = ai.sh
+    for env, n in (('"OLLAMA_ORIGINS=*" OLLAMA_HOST=127.0.0.1', 1), ('OLLAMA_ORIGINS=chrome-extension://*', 0),
+                   ('OLLAMA_ORIGINS=http://localhost,https://*', 1), ('PATH=/usr/bin', 0)):
+        ai.sh = lambda *a, **k: env if 'Environment' in a else ''
+        try: rows = [t for t, _, _ in ai.local_servers() if 'OLLAMA_ORIGINS' in t]
+        finally: ai.sh = real
+        assert len(rows) == n, (env, rows)
+
+
 if __name__ == '__main__':
-    test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
