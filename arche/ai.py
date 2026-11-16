@@ -2,7 +2,7 @@
 # Cursor, VS Code, Windsurf and friends (plugins, skills, hooks, MCP servers, editor extensions), scans their files for
 # hidden instructions and malicious commands, flags settings that let an agent act without asking, finds plaintext API
 # keys (never printing them), local model servers open to the network, and pickle model files that run code when loaded.
-import io, json, os, pickletools, re, zipfile
+import hashlib, io, json, os, pickletools, re, zipfile
 from struct import error as struct_error
 from pathlib import Path
 from .hardening import argv
@@ -127,6 +127,22 @@ def scan_tree(root, label, limit=1 << 20):
             yield from scan_text(text(p), f'{label} {tilde(p)}')
 
 
+def fingerprint(root):
+    """Short hash of every file under root (or of one file): it changes when a plugin or skill's code does,
+    so an update that quietly swaps what you approved (a rug pull) shows up as new against the baseline."""
+    h, paths = hashlib.sha256(), [root] if os.path.isfile(root) else sorted(
+        os.path.join(d, f) for d, dirs, fs in os.walk(root) if not re.search(r'/(\.git|__pycache__)(/|$)', d) for f in fs)
+    # ponytail: __pycache__ is left out because running the plugin rewrites it; a planted .pyc is the scanners' job, not this one
+    for p in paths:
+        try:
+            if os.path.islink(p): h.update(f'{os.path.relpath(p, root)}\0link\0{os.readlink(p)}\0'.encode()); continue
+            h.update(f'{os.path.relpath(p, root)}\0{os.path.getsize(p)}\0'.encode())
+            with open(p, 'rb') as fh:
+                for b in iter(lambda: fh.read(1 << 20), b''): h.update(b)
+        except OSError: pass
+    return h.hexdigest()[:12]
+
+
 def servers(obj, path=()):
     """Find MCP server tables anywhere in a config: {name: {command/args or url}} under mcpServers/servers/context_servers/mcp."""
     if not isinstance(obj, dict): return
@@ -179,14 +195,18 @@ def secret_kinds(t):
 @check('AI plugins, skills and hooks', FAM)
 def plugins():
     st = jsonf(f'{HOME}/.claude/settings.json')
-    for k, on in (st.get('enabledPlugins') or {}).items(): yield item(f'Claude Code plugin {k} ({"enabled" if on else "disabled"})')
+    for k, on in (st.get('enabledPlugins') or {}).items():
+        name, _, market = k.partition('@')
+        d = max(files(f'~/.claude/plugins/cache/{market}/{name}/*'), key=os.path.getmtime, default=None)   # newest installed version
+        yield item(f'Claude Code plugin {k} ({"enabled" if on else "disabled"})' + (f', code {fingerprint(d)}' if d else ''))
     for name, m in jsonf(f'{HOME}/.claude/plugins/known_marketplaces.json').items():
         src = m.get('source', {}) if isinstance(m, dict) else {}
         yield item(f'Claude Code plugin marketplace {name}: {src.get("repo") or src.get("url") or src.get("path") or "?"}')
     for root in SKILL_DIRS:
         for sk in files(f'{root}/*/SKILL.md', f'{root}/SKILL.md', f'{root}/*.md', f'{root}/*/gemini-extension.json'):
             nm = re.search(r'^name:\s*(.+)$', text(sk), re.M)
-            yield item(f'Skill/command {nm[1].strip() if nm else Path(sk).parent.name} ({tilde(sk)})')
+            whole = sk.endswith(('/SKILL.md', '/gemini-extension.json')) and os.path.dirname(sk) != os.path.expanduser(root)
+            yield item(f'Skill/command {nm[1].strip() if nm else Path(sk).parent.name} ({tilde(sk)}), code {fingerprint(os.path.dirname(sk) if whole else sk)}')
     for f in files('~/.claude/settings.json', '~/.claude/settings.local.json', '/etc/claude-code/managed-settings.json',
                    '~/.claude/plugins/cache/*/*/*/hooks/hooks.json', '~/.claude/plugins/cache/*/*/*/hooks.json'):
         where = re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', tilde(f))

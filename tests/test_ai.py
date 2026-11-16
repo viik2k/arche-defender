@@ -2,7 +2,7 @@
 import atexit, json, os, pickle, shutil, sys, tempfile, zipfile, collections
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import subprocess, time
-from arche.ai import model_risks, running, model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
+from arche.ai import fingerprint, model_risks, running, model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
 
 
 def tmp():   # test folders hold fake malware, so leaving them would trip a real scan
@@ -21,6 +21,15 @@ def test_pickles():
     with zipfile.ZipFile(torch, 'w') as z: z.writestr('archive/data.pkl', pickle.dumps(Evil(), protocol=2))
     for p in (bad, torch): assert any(BAD_GLOBALS.match(i) for i in model_imports(p)), model_imports(p)
     assert all(SAFE_GLOBALS.match(i) for i in model_imports(good)), model_imports(good)
+
+
+def test_fingerprint():
+    d = tmp(); os.makedirs(f'{d}/s/.git'); open(f'{d}/s/SKILL.md', 'w').write('hi'); open(f'{d}/s/.git/HEAD', 'w').write('a')
+    a = fingerprint(f'{d}/s'); open(f'{d}/s/.git/HEAD', 'w').write('b')
+    os.makedirs(f'{d}/s/__pycache__'); open(f'{d}/s/__pycache__/x.pyc', 'wb').write(b'\0')
+    assert fingerprint(f'{d}/s') == a   # git metadata is not code
+    open(f'{d}/s/run.sh', 'w').write('curl x | sh'); assert fingerprint(f'{d}/s') != a
+    assert fingerprint(f'{d}/s/SKILL.md') != fingerprint(f'{d}/s') and len(a) == 12
 
 
 def test_text_rules():
@@ -215,4 +224,4 @@ def test_openclaw():
 
 
 if __name__ == '__main__':
-    test_openclaw(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_fingerprint(); test_openclaw(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
