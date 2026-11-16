@@ -353,28 +353,31 @@ def running():
                    'Fine for a throwaway container or VM; on your own account, restart it without that flag')
 
 
-@check('MCP servers', FAM)
-def mcp():
-    loose = []
+def mcp_servers():
+    """(where, name, server) for every MCP server configured in an agent, a plugin, a Desktop extension or Codex."""
     srcs = [(tilde(f), jsonc(f)) for f in files(*MCP_FILES)]
     srcs += [(re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', f), {'mcpServers': jsonf(f).get('mcpServers', jsonf(f))})
              for f in files('~/.claude/plugins/cache/*/*/*/.mcp.json')]
     for where, conf in srcs:
         for path, name, s in servers(conf):
-            w = where + (f' > {path[-1]}' if path and path[-1] not in ('mcp',) and where.endswith('.claude.json') else '')
-            yield from judge_server(name, s, tilde(w))
-            if unpinned(s): loose.append(name)
+            yield tilde(where + (f' > {path[-1]}' if path and path[-1] not in ('mcp',) and where.endswith('.claude.json') else '')), name, s
     for mf in files(f'{CLAUDE_EXT}/*/manifest.json'):   # .mcpb/.dxt bundles: MCP servers that run unsandboxed
-        j = jsonf(mf); cfg = (j.get('server') or {}).get('mcp_config') or {}
-        yield from judge_server(j.get('display_name') or j.get('name') or Path(mf).parent.name, cfg, 'Claude Desktop extension')
+        j = jsonf(mf)
+        yield 'Claude Desktop extension', j.get('display_name') or j.get('name') or Path(mf).parent.name, (j.get('server') or {}).get('mcp_config') or {}
     codex = text(f'{HOME}/.codex/config.toml')
     for name, body in re.findall(r'^\[mcp_servers\.([^\]]+)\]\n((?:[^\[].*\n?)*)', codex, re.M):
         cmd = re.search(r'^command\s*=\s*"([^"]*)"', body, re.M)
         args = re.findall(r'"([^"]*)"', (re.search(r'^args\s*=\s*\[(.*?)\]', body, re.M | re.S) or [''])[0] or '')
         url = re.search(r'^url\s*=\s*"([^"]*)"', body, re.M)
-        s = {'command': cmd[1] if cmd else '', 'args': args, 'url': url[1] if url else ''}
-        yield from judge_server(name, s, '~/.codex/config.toml')
-        if unpinned(s): loose.append(name)
+        yield '~/.codex/config.toml', name, {'command': cmd[1] if cmd else '', 'args': args, 'url': url[1] if url else ''}
+
+
+@check('MCP servers', FAM)
+def mcp():
+    loose = []
+    for where, name, s in mcp_servers():
+        yield from judge_server(name, s, where)
+        if unpinned(s) and where != 'Claude Desktop extension': loose.append(name)
     if loose:
         yield warn(f'{len(loose)} MCP server(s) run whatever package version is newest (npx/uvx without a pinned version): '
                    f'{", ".join(sorted(set(loose)))}', 'Pin a version (pkg@1.2.3) so a hijacked release cannot run on your PC')
@@ -386,6 +389,30 @@ NPM_ROOTS = ('~/.npm/_npx/*/node_modules', '~/.npm-global/lib/node_modules', '~/
 PY_ENVS = ('~/.cache/uv/archive-v0/*', '~/.local/share/uv/tools/*', '~/.local/share/pipx/venvs/*')
 # What npm worms left in install scripts: Shai-Hulud ran trufflehog for secrets, the Nx "s1ngularity" hack had AI CLIs hunt them.
 WORM = re.compile(r'trufflehog|shai-?hulud|--dangerously-skip-permissions|--dangerously-bypass-approvals|--yolo\b|--trust-all-tools', re.I)
+
+
+def uvx_package(s):
+    """The package a uvx (or `uv tool run`) MCP server runs, without its version or extras."""
+    c = [str(x) for x in [s.get('command', ''), *s.get('args', [])]]
+    if not c: return None
+    exe, rest = os.path.basename(c[0]), c[1:]
+    if exe == 'uv' and rest[:2] == ['tool', 'run']: rest = rest[2:]
+    elif exe != 'uvx': return None
+    if '--from' in rest and rest.index('--from') + 1 < len(rest): return re.split(r'[\[=@<>~ ]', rest[rest.index('--from') + 1])[0]
+    skip = False
+    for a in rest:   # flags that take a value: uvx --python 3.12 --with x pkg
+        if skip or a.startswith('-'): skip = a in ('--python', '-p', '--with', '-w', '--index', '--index-url', '--extra-index-url',
+                                                   '--env-file', '--directory', '--with-requirements', '--constraint', '-c') and not skip; continue
+        return re.split(r'[\[=@<>~ ]', a)[0]
+
+
+def py_package_files(name):
+    """A Python package's own .py files in the uvx/uv tool/pipx environments, from its RECORD (its dependencies are left out)."""
+    norm = re.sub(r'[-_.]+', '_', name).lower()
+    for rec in files(*(f'{r}/lib/python3*/site-packages/*.dist-info/RECORD' for r in PY_ENVS)):
+        if re.sub(r'[-_.]+', '_', os.path.basename(os.path.dirname(rec)).split('-', 1)[0]).lower() == norm:
+            sp = os.path.dirname(os.path.dirname(rec))
+            yield from (os.path.normpath(os.path.join(sp, l.split(',')[0])) for l in text(rec).splitlines() if l.split(',')[0].endswith('.py'))
 
 
 def install_scripts(nm):
@@ -415,6 +442,9 @@ def packages():
                     yield alert(f'{where} package {name}: its {hook} script mentions {m[0]}, the mark of an npm worm that steals tokens',
                                 'Rotate your npm, GitHub and cloud tokens, delete the package (and ~/.npm/_npx), and check GitHub for repos you did not make')
                 yield from scan_text(body, f'{where} package {name} ({hook})')
+    for name in sorted({p for _, _, s in mcp_servers() if (p := uvx_package(s))}):   # uvx MCP servers: the same tool-poisoning scan as npx
+        for f in dict.fromkeys(py_package_files(name)):
+            if os.path.isfile(f) and os.path.getsize(f) < 8 << 20: yield from scan_text(text(f), f'MCP server package {name} {tilde(f)}')
     for f in files(*(f'{r}/lib/python3*/site-packages/*.pth' for r in PY_ENVS)):
         code = [l for l in text(f).splitlines() if l.startswith(('import ', 'import\t'))]
         if code:
