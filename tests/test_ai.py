@@ -602,6 +602,10 @@ def test_server_auto_approve():
     assert rows({'trust': True}) == rows({'autoApprove': ['*']}) == [(1, 'runs every one of its tools without asking')]
     assert rows({'alwaysAllow': ['read_file', 'list_dir']}) == [(0, 'runs these tools without asking: read_file, list_dir')]
     assert rows({'trust': False, 'autoApprove': []}) == []
+    dk = lambda *a: [r[0][20:] for r in judge_server('x', {'command': 'docker', 'args': ['run', '-i', '--rm', *a]}, 'here') if r[1]]
+    assert dk('--mount', 'type=bind,src=/,dst=/host', 'mcp/fs') == ['starts a container that mounts / from this PC'], dk('--mount', 'type=bind,src=/,dst=/host', 'mcp/fs')
+    assert dk('-v', '/var/run/docker.sock:/var/run/docker.sock', 'docker/mcp-gateway')[0].startswith('starts a container that can drive the container engine')
+    assert dk('-v', f'{os.getcwd()}:/work', '-e', 'GITHUB_TOKEN', 'ghcr.io/github/github-mcp-server') == []
 
 
 if __name__ == '__main__':

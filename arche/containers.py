@@ -48,7 +48,7 @@ def daemon_rows(cfg, unit_args, sock_mode):
 RISKS = ((r'privileged["\']?\s*[:=]\s*["\']?true|--privileged\b', 'runs privileged (root on this PC)'),
          (r'/run/(docker|podman/podman|containerd/containerd)\.sock', 'can drive the container engine through its socket (root on this PC)'),
          (r'\bpid["\']?\s*[:=]\s*["\']?host\b|--pid[=\s]+host\b', 'sees and can signal every process on this PC'),
-         (r'(?:^\s*-\s*|-v[=\s]+|--volume[=\s]+|source[=:]\s*)["\']?(/|/etc|/root|/home|/boot|/dev|(?:~|\$\{?HOME\}?)(?:/\.(?:ssh|aws|gnupg|kube|docker))?)(?=[:"\'\s,]|$)',
+         (r'(?:^\s*-\s*|-v[=\s]+|--volume[=\s]+|\b(?:source|src)[=:]\s*)["\']?(/|/etc|/root|/home|/boot|/dev|(?:~|\$\{?HOME\}?)(?:/\.(?:ssh|aws|gnupg|kube|docker))?)(?=[:"\'\s,]|$)',
           'mounts {} from this PC'),
          (r'(/dev/(?:sd[a-h]|vd[a-h]|hd[a-h]|nvme\d(?:n1)?|mem|kmem|port))\b', 'gets the raw device {}'),
          (r'(?:apparmor|seccomp)[:=]unconfined|label[:=]disable', 'turns its confinement off'))

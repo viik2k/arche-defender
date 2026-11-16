@@ -6,6 +6,7 @@ import hashlib, io, json, os, pickletools, re, zipfile
 from struct import error as struct_error
 from pathlib import Path
 from .hardening import argv
+from .containers import config_risks, devcontainer_text
 from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check, action, have
 
 try: from .malware import match as _match
@@ -222,6 +223,9 @@ def judge_server(name, s, where):
     cmd = ' '.join(str(x) for x in [s.get('command', ''), *s.get('args', [])])
     if re.search(r'(^|/)(tmp|dev/shm|var/tmp)/|/Downloads/', cmd): yield alert(f'MCP server {name} ({where}) runs a program from a temp/download folder: {redact(cmd)[:160]}')
     yield from scan_text(cmd, f'MCP server {name} ({where})')
+    if re.match(r'(\S*/)?(docker|podman)\s+(container\s+)?run\b', cmd) and (risks := config_risks(cmd)):
+        yield warn(f'MCP server {name} ({where}) starts a container that ' + '; '.join(risks),
+                   'Drop those docker run options unless the server truly needs them; a filesystem server needs only the folder it works on')
     # Tools the agent may call without asking: Gemini CLI and Qwen Code "trust", Cline and Roo Code "alwaysAllow", Kiro and Amazon Q "autoApprove".
     # A web page, issue or file the agent reads can then make it call them.
     ok = s.get('alwaysAllow') or s.get('autoApprove') or []
@@ -1206,7 +1210,7 @@ MAGIC = {b'\x7fELF': 'Linux program', b'MZ': 'Windows program', b'\xcf\xfa\xed\x
 def vet_rows(root):
     """Findings for an unpacked skill, plugin, MCP server or extension: rule hits in its text, the commands it runs on its own
     (hooks, MCP servers, install scripts), wide allowed-tools, and compiled programs nothing here can read."""
-    from . import malware, containers
+    from . import malware
     n, bins = 0, []
     for d, dirs, fs in os.walk(root) if os.path.isdir(root) else [(os.path.dirname(root), [], [os.path.basename(root)])]:
         dirs[:] = [x for x in dirs if x != '.git']   # node_modules stays: a bundled dependency is where a payload hides
@@ -1219,8 +1223,8 @@ def vet_rows(root):
             if not k and os.path.splitext(f)[1].lower() in SCAN_EXT and st.st_size < 2 << 20: yield from scan_text(text(p), p)
             else: yield from malware.inspect(p, st, False, risky=True)   # hashes, lures, documents, nested zips
             if f == 'SKILL.md' or f.endswith('.md') and re.search(r'/(commands|agents)/', p): yield from preapproval_warns([p])
-            if re.match(r'(docker-)?compose([.-][\w.-]+)?\.ya?ml$|\.?devcontainer\.json$', f) and (risks := containers.config_risks(
-                    text(p) if f.endswith('ml') else containers.devcontainer_text(j if isinstance(j := jsonc(p), dict) else {}))):
+            if re.match(r'(docker-)?compose([.-][\w.-]+)?\.ya?ml$|\.?devcontainer\.json$', f) and (risks := config_risks(
+                    text(p) if f.endswith('ml') else devcontainer_text(j if isinstance(j := jsonc(p), dict) else {}))):
                 yield warn(f'{p}: a container started from it ' + '; '.join(risks),
                            'Read why it needs that before docker compose up or "Reopen in Container", and remove what it does not need')
             if not f.endswith('.json'): continue
