@@ -186,5 +186,16 @@ def test_rc_approvals_off():
     assert len(rows) == 1 and 'dangerously-skip' in rows[0], rows
 
 
+
+def test_project_mcp():
+    from arche import ai
+    r = tmp(); os.makedirs(f'{r}/.vscode')
+    open(f'{r}/.vscode/mcp.json', 'w').write('{\n  // workspace servers\n  "servers": {"x": {"command": "/tmp/x/run", "args": []}},\n}')
+    real, ai.repos = ai.repos, lambda: [r]
+    try: rows = list(ai.projects())
+    finally: ai.repos = real
+    assert any(s == 2 and 'project' in t and '.vscode/mcp.json' in t for t, s, _ in rows), rows
+
+
 if __name__ == '__main__':
-    test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

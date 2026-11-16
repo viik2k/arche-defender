@@ -71,6 +71,8 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
              '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json', '~/.continue/config.json',
              '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json',
              '~/.config/zed/settings.json')
+PROJECT_MCP = ('.mcp.json', '.vscode/mcp.json', '.cursor/mcp.json', '.gemini/settings.json', '.roo/mcp.json', '.kiro/settings/mcp.json',
+               '.amazonq/mcp.json', 'opencode.json', '.zed/settings.json')
 MEMORY_FILES = ('~/.claude/CLAUDE.md', '~/.claude/memory/*.md', '~/.claude/projects/*/memory/*.md', '~/.codex/AGENTS.md', '~/.gemini/GEMINI.md',
                 '~/.config/opencode/AGENTS.md', '~/.qwen/QWEN.md', '~/.windsurf/memories/*', '~/.codeium/windsurf/memories/*')
 CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
@@ -88,7 +90,7 @@ def jsonc(p):
     t = text(p)
     try: return json.loads(t)
     except ValueError: pass
-    t = re.sub(r'^\s*//.*$|/\*.*?\*/', '', t, flags=re.M | re.S)
+    t = re.sub(r'^\s*//[^\n]*$|/\*.*?\*/', '', t, flags=re.M | re.S)   # [^\n]: under re.S a .* comment ate the rest of the file
     try: return json.loads(re.sub(r',\s*([}\]])', r'\1', t))
     except ValueError: return {}
 
@@ -462,7 +464,9 @@ def repos():
 def projects():
     for r in repos():
         rr = tilde(r)
-        for path, name, s in servers(jsonf(f'{r}/.mcp.json') or {}): yield from judge_server(name, s, f'project {rr}')
+        for rel in PROJECT_MCP:   # a repo's own MCP config: Cursor once ran it on open (CurXecute, MCPoison)
+            for path, name, s in servers(jsonc(f'{r}/{rel}') if os.path.isfile(f'{r}/{rel}') else {}):
+                yield from judge_server(name, s, f'project {rr}' + (f', {rel}' if rel != '.mcp.json' else ''))
         for f in files(f'{r}/.claude/settings.json', f'{r}/.claude/settings.local.json'):
             s = jsonf(f)
             yield from claude_settings(s, tilde(f))
