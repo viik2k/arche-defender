@@ -74,5 +74,14 @@ class Browsers(unittest.TestCase):
             self.assertEqual(browsers.nss_cas('/x'), ['Evil Root CA'])
 
 
+class CopyQuery(unittest.TestCase):
+    def test_reads_rows_still_in_the_wal(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        con = sqlite3.connect(f'{d}/h.sqlite'); self.addCleanup(con.close)   # left open, as a running app keeps it
+        con.executescript('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0; CREATE TABLE t (x); INSERT INTO t VALUES (1), (2);')
+        self.assertTrue(os.path.exists(f'{d}/h.sqlite-wal'))
+        self.assertEqual(browsers.copy_query(f'{d}/h.sqlite', 'SELECT x FROM t'), [(1,), (2,)])
+
+
 if __name__ == '__main__':
     unittest.main()

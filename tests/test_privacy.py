@@ -96,6 +96,20 @@ class Input(unittest.TestCase):
         self.assertEqual([s for _, s, _ in privacy.input_rows([], kb, True)], [WARN])
 
 
+class Clipboard(unittest.TestCase):
+    def test_kinds(self):
+        fake = 'ghp_' + 'aB3dE5fG7hJ9kL1mN2pQ4rS6tU8vW0xY2zA4'
+        self.assertEqual(privacy.clip_kinds(['hello world', None, 'Tr0ub4dor&3xQ']), ['a password'])
+        self.assertEqual(privacy.clip_kinds(['def f(x): return x', 'snake_case_Name1', 'https://youtu.be/watch?v=dQw4w9WgXcQ',
+                                             '~/Desktop/Repos/arche2.py', 'Jane.Doe1@Example.com', 'self.assertEqual(x1)']), [])
+        self.assertIn('GitHub token', privacy.clip_kinds([fake]))
+
+    def test_gnome_registry(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        p = Path(d, 'registry.txt'); p.write_text('[{"contents": "a", "favorite": false}, "b"]')
+        self.assertEqual(privacy.clip_entries(str(p)), ['a', 'b'])
+
+
 if __name__ == '__main__':
     unittest.main()
 

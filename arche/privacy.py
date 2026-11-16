@@ -3,6 +3,7 @@
 import configparser, grp, json, os, re
 from .core import check, alert, warn, item, sh, have, text, files, HOME
 from .ai import secret_kinds
+from .browsers import copy_query
 from .malware import walk
 
 
@@ -213,6 +214,40 @@ def history():
         if n: yield warn(f'{f.replace(HOME, "~")} holds {n} commands with secrets ({", ".join(kinds)})',
                          fix='Delete those lines from the file and change the secrets. Start a command with a space to keep it out of '
                              'history (bash: HISTCONTROL=ignorespace), or pass secrets through a file or prompt instead.')
+
+
+# Clipboard managers that save their history to disk: KDE Klipper (Plasma 6) and GNOME's Clipboard Indicator.
+CLIPBOARDS = {'~/.local/share/klipper/history3.sqlite': 'KDE clipboard history',
+              '~/.cache/clipboard-indicator@tudmotu.com/registry.txt': 'GNOME Clipboard Indicator history'}
+# A copied password: one word mixing lower and upper case, digits and a symbol (generated passwords look like this).
+PASSWORD_LIKE = re.compile(r'(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^\w\s])\S{10,64}')
+NOT_A_PASSWORD = re.compile(r'://|^[/~.]|^[\w.+-]+@[\w-]+\.[\w.]+$|\w\(.*\)')   # links, paths, emails, code calls
+
+
+def clip_kinds(entries):
+    """Kinds of secret among clipboard entries; the values themselves are never kept."""
+    kinds = set()
+    for t in entries:
+        t = t.strip() if isinstance(t, str) else ''
+        k = set(history_secrets(t)[1]) | set(sensitive('', t))
+        kinds |= k or ({'a password'} if PASSWORD_LIKE.fullmatch(t) and not NOT_A_PASSWORD.search(t) else set())
+    return sorted(kinds)
+
+
+def clip_entries(path):
+    if path.endswith('.sqlite'): return [t for (t,) in copy_query(path, 'SELECT text FROM main')]
+    try: return [x.get('contents') if isinstance(x, dict) else x for x in json.loads(text(path) or '[]')]
+    except ValueError: return []
+
+
+@check('Clipboard history', 'Privacy')
+def clipboard():
+    """Clipboard managers that save their history keep every copied password and key on disk, where infostealers look."""
+    for f in files(*CLIPBOARDS):
+        if kinds := clip_kinds(clip_entries(f)):
+            yield warn(f'{CLIPBOARDS[f.replace(HOME, "~")]} keeps copied secrets on disk ({", ".join(kinds)})',
+                       fix='Clear the clipboard history and turn off saving it between sessions in the clipboard settings, then change '
+                           'those secrets. Password managers that mark copies as secret (KeePassXC) are left out of the history.')
 
 
 SENSITIVE_EXT = {'.txt', '.csv', '.md', '.json', '.rtf', '.text', '.note', '.pem', '.key', ''}

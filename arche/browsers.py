@@ -17,7 +17,8 @@ def copy_query(db, sql, args=()):
     try:
         with tempfile.TemporaryDirectory() as tmp:
             cp = Path(tmp) / 'db.sqlite'; shutil.copyfile(db, cp)
-            con = sqlite3.connect(f'file:{cp}?mode=ro', uri=True)
+            if os.path.exists(f'{db}-wal'): shutil.copyfile(f'{db}-wal', f'{cp}-wal')   # recent rows not yet merged in (Firefox, KDE)
+            con = sqlite3.connect(cp)   # a writable copy, so SQLite can read the WAL without its -shm index
             try: return con.execute(sql, args).fetchall()
             finally: con.close()
     except (OSError, sqlite3.Error): return []
