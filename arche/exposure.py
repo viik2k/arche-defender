@@ -1,9 +1,10 @@
 # Network exposure: which listening services the firewall actually lets other machines reach, container ports
 # Docker publishes around firewalld, and port forwards the router opened through UPnP.
+# Also the router's identity, and another device claiming its hardware address (ARP spoofing).
 # What listens at all is persistence.py's 'Network listeners'; the zones themselves are hardening.py's 'Firewall rules'.
 import ipaddress, re, socket, time, urllib.parse, urllib.request
 import xml.etree.ElementTree as ET
-from .core import check, warn, item, sh, have
+from .core import check, warn, item, sh, have, text
 from .hardening import INFRA_IF
 
 RISKY = {21: 'FTP', 23: 'Telnet', 139: 'Windows file sharing (SMB)', 445: 'Windows file sharing (SMB)',
@@ -148,3 +149,28 @@ def upnp():
         try: svcs = list(wan_services(fetch(loc), loc))
         except (OSError, ET.ParseError): continue
         yield from mapping_rows(urllib.parse.urlsplit(loc).hostname, (m for st, url in svcs for m in mappings(st, url)), mine)
+
+
+def maker(mac, db='/usr/share/hwdata/oui.txt'):
+    """Maker of a network card from its MAC prefix (hwdata's copy of the IEEE list)."""
+    if int(mac[:2], 16) & 2: return 'randomised or virtual address'
+    m = re.search(rf'^{re.escape(mac[:8].replace(":", "-").upper())}\s+\(hex\)\s+(.+)$', text(db), re.M)
+    return m[1].strip() if m else 'unknown maker'
+
+
+def gateway_rows(gw, neigh):
+    """neigh: IPv4 -> MAC from `ip -4 neigh`. Another IP answering with the router's MAC is the ARP-spoofing signature."""
+    mac = neigh.get(gw)
+    if not mac: return
+    twins = sorted(ip for ip, m in neigh.items() if m == mac and ip != gw)
+    if twins: yield warn(f'{", ".join(twins)} answers with the same hardware address as your router {gw} ({mac}): possible ARP spoofing',
+                         fix='Someone on your network may be intercepting your traffic. Unplug unknown devices, reboot the router, '
+                             'and check again; if it persists on a network you trust, look up that address in the router\'s client list.')
+    yield item(f'Router {gw} is {mac} ({maker(mac)})', fix='If this changes without a new router, another device may be impersonating it.')
+
+
+@check('Local network', 'Network')
+def local():
+    neigh = {ip: mac.lower() for ip, mac in re.findall(r'^(\S+) dev \S+ lladdr (\S+)', sh('ip', '-4', 'neigh', 'show'), re.M)}
+    for gw in dict.fromkeys(re.findall(r'^default via (\S+)', sh('ip', '-4', 'route', 'show', 'default'), re.M)):
+        yield from gateway_rows(gw, neigh)

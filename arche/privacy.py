@@ -2,6 +2,7 @@
 # and the hardware that is plugged in or paired (a new "keyboard" can be a BadUSB).
 import configparser, json, os, re
 from .core import check, alert, warn, item, sh, have, text, files, HOME
+from .ai import secret_kinds
 
 
 def comm(pid): return text(f'/proc/{pid}/comm').strip() or f'pid {pid}'
@@ -124,3 +125,34 @@ def wifi():
         f = sh('nmcli', '-t', '-g', '802-11-wireless.ssid,802-11-wireless-security.key-mgmt,802-11-wireless-security.proto,connection.autoconnect',
                'connection', 'show', 'uuid', uuid, timeout=10).split('\n')
         if len(f) >= 4 and (r := wifi_row(*f[:4], uuid)): yield r
+
+
+HISTORY = ('~/.bash_history', '~/.zsh_history', '~/.zhistory', '~/.local/share/fish/fish_history', '~/.python_history',
+           '~/.mysql_history', '~/.psql_history', '~/.sqlite_history', '~/.node_repl_history', '~/.rediscli_history')
+NOT_A_VALUE = r'(?![$<]|CHANGEME|\*+\s)'   # $VAR, <placeholder>, CHANGEME and masked values are not secrets
+HIST_SECRETS = [(k, re.compile(p)) for k, p in (
+    ('password on a command line', r'(?:\bsshpass\s+-p\s*|\bmysql\w*\b.*?\s-p(?=\S)|--pass(?:word)?[= ]\s*|\bPGPASSWORD=|'
+                                   r'\becho\s+(?=\S+\s*\|\s*sudo\s+-S))["\']?' + NOT_A_VALUE + r'[^\s"\']{4,}'),
+    ('password in a URL', r'\w+://[^/\s:@]+:' + NOT_A_VALUE + r'[^@\s/]{3,}@'),
+    ('curl password', r'\bcurl\b.*?(?:\s-u\s*|--user[= ])[^\s:]+:' + NOT_A_VALUE + r'\S{3,}'),
+    ('secret in a variable', r'\b\w*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY)\w*=["\']?' + NOT_A_VALUE + r'[^\s"\'$]{8,}'),
+    ('AWS key', r'\bAKIA[0-9A-Z]{16}\b'))]
+
+
+def history_secrets(t):
+    """(lines with a secret, kinds of secret) in a history file's text; the values themselves are never kept."""
+    n, kinds = 0, set()
+    for l in t.splitlines():
+        k = {name for name, rx in HIST_SECRETS if rx.search(l)} | set(secret_kinds(l))
+        if k: n, kinds = n + 1, kinds | k
+    return n, sorted(kinds)
+
+
+@check('Secrets in shell history', 'Privacy')
+def history():
+    """Passwords, tokens and keys typed into a shell or REPL stay in its history file, which infostealers collect first."""
+    for f in files(*HISTORY):
+        n, kinds = history_secrets(text(f))
+        if n: yield warn(f'{f.replace(HOME, "~")} holds {n} commands with secrets ({", ".join(kinds)})',
+                         fix='Delete those lines from the file and change the secrets. Start a command with a space to keep it out of '
+                             'history (bash: HISTCONTROL=ignorespace), or pass secrets through a file or prompt instead.')

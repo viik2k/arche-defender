@@ -60,4 +60,15 @@ class Upnp(unittest.TestCase):
         self.assertEqual(rows[1][0], 'The router forwards TCP port 3389 to 192.168.1.20:3389 (x) from the internet to this PC')
 
 
+class Gateway(unittest.TestCase):
+    def test_spoof(self):
+        neigh = {'192.168.1.1': '08:9b:f1:08:1d:8d', '192.168.1.50': '08:9b:f1:08:1d:8d', '192.168.1.9': 'bc:24:11:cc:8c:00'}
+        rows = list(exposure.gateway_rows('192.168.1.1', neigh))
+        self.assertEqual([s for _, s, _ in rows], [WARN, INFO])
+        self.assertTrue(rows[0][0].startswith('192.168.1.50 answers'))
+        self.assertEqual([s for _, s, _ in exposure.gateway_rows('192.168.1.1', {'192.168.1.1': 'aa:bb:cc:dd:ee:ff'})], [INFO])
+        self.assertEqual(list(exposure.gateway_rows('192.168.1.1', {})), [])
+        self.assertEqual(exposure.maker('02:00:00:00:00:01'), 'randomised or virtual address')
+
+
 if __name__ == '__main__': unittest.main()

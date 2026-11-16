@@ -70,3 +70,16 @@ class Usb(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class History(unittest.TestCase):
+    def test_secrets(self):
+        bad = ['sshpass -p hunter22 ssh pi@nas', 'mysql -u root -pS3cretPass db', 'curl -u admin:letmein123 http://x',
+               'git clone https://bob:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/x/y', 'export DB_PASSWORD="correcthorse"',
+               ': 1700000000:0;docker login --password Tr0ub4dor reg', 'echo hunter22 | sudo -S dnf install x', 'AKIAABCDEFGHIJKLMNOP']
+        ok = ['mysql -u root -p mydb', 'docker login --password-stdin', 'export API_KEY=$(secret-tool lookup x y)',
+              'export TOKEN=CHANGEME', 'docker run -u 1000:1000 img', 'curl -u "$USER:$PASS" x', 'git push', 'export TOKEN=<your-token>']
+        for l in bad: self.assertEqual(privacy.history_secrets(l)[0], 1, l)
+        for l in ok: self.assertEqual(privacy.history_secrets(l)[0], 0, l)
+        n, kinds = privacy.history_secrets('\n'.join(bad))
+        self.assertEqual(n, len(bad)); self.assertIn('GitHub token', kinds)
