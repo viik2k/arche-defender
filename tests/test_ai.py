@@ -558,5 +558,13 @@ def test_vet_repo():
     assert 'sample' not in t, t
 
 
+def test_lan_http_mcp():
+    import arche.ai as ai
+    sev = lambda s: [r[1] for r in ai.judge_server('x', s, 'here') if 'unencrypted' in r[0]]
+    assert sev({'type': 'http', 'url': 'http://192.168.4.10:8765/mcp', 'headers': {'Authorization': 'Bearer ${T}'}}) == [1]
+    assert sev({'url': 'http://nas.lan/mcp?token=abc'}) == [1] and sev({'url': 'http://192.168.4.10/mcp'}) == []
+    assert sev({'url': 'http://127.0.0.1/mcp', 'headers': {'Authorization': 'x'}}) == [] and sev({'url': 'https://10.0.0.2/mcp', 'headers': {'X-Api-Key': 'x'}}) == []
+
+
 if __name__ == '__main__':
-    test_vet_repo(); test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_lan_http_mcp(); test_vet_repo(); test_wide_terminal(); test_scan_tree_links(); test_browser_mcp(); test_trusted_dirs(); test_plugin_manifests(); test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

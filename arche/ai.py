@@ -207,8 +207,14 @@ def judge_server(name, s, where):
     yield item(ver(f'MCP server {name} ({where}): {d}'))
     url = str(s.get('url') or s.get('serverUrl') or s.get('httpUrl') or '')
     host = re.match(r'^\w+://([^/:?]+)', url)
-    if url.startswith('http://') and host and not re.match(r'^(localhost|127\.|\[?::1|192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|100\.)', host[1]):
+    lan = host and re.match(r'^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.|[\w-]+\.(local|lan|home|internal)$)', host[1])
+    if url.startswith('http://') and host and not lan and not re.match(r'^(localhost|127\.|\[?::1|100\.)', host[1]):   # 100.: Tailscale, encrypted
         yield warn(f'MCP server {name} ({where}) talks to {host[1]} unencrypted (http://)', 'Use the https:// endpoint')
+    auth = sorted(k for k in (s.get('headers') if isinstance(s.get('headers'), dict) else {}) if re.search(r'auth|token|key|cookie|secret', k, re.I))
+    if re.search(r'[?&](token|key|api_?key|auth|access_token)=', url, re.I): auth.append('a token in the URL')
+    if url.startswith('http://') and auth and lan:
+        yield warn(f'MCP server {name} ({where}) sends its sign-in ({", ".join(auth)}) to {host[1]} unencrypted (http://): any device on '
+                   'that network can copy it and use the server as you', 'Serve it over HTTPS (a reverse proxy with a local certificate), or reach it over Tailscale or WireGuard')
     if host and domain_hit and (hit := domain_hit(host[1])): yield alert(f'MCP server {name} ({where}) points at a known-bad host {host[1]} ({hit})')
     cmd = ' '.join(str(x) for x in [s.get('command', ''), *s.get('args', [])])
     if re.search(r'(^|/)(tmp|dev/shm|var/tmp)/|/Downloads/', cmd): yield alert(f'MCP server {name} ({where}) runs a program from a temp/download folder: {redact(cmd)[:160]}')
