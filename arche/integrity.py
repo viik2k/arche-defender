@@ -1,45 +1,75 @@
 # Integrity and rootkit checks: are the system's own tools still the ones the packages shipped, and is anything
 # hiding from /proc, the module list or the network stack? Read-only; without root it sees your own processes' memory maps.
 import os, re
-from .core import alert, warn, item, ver, sh, text, lines, files, check
+from .core import PKG, REINSTALL, alert, warn, item, ver, sh, text, lines, files, check, owner
 from .hardening import INFRA_IF
 
-CRITICAL = ('coreutils', 'util-linux', 'procps-ng', 'findutils', 'grep', 'sed', 'gawk', 'bash', 'iproute', 'net-tools',
+CRITICAL = {   # the tools attackers swap to hide (ls, ps, ss, sudo, sshd...), per package manager
+    'rpm': ('coreutils', 'util-linux', 'procps-ng', 'findutils', 'grep', 'sed', 'gawk', 'bash', 'iproute', 'net-tools',
             'openssh', 'openssh-clients', 'openssh-server', 'sudo', 'shadow-utils', 'pam', 'polkit', 'systemd', 'glibc',
-            'passwd', 'login', 'kmod', 'lsof', 'psmisc', 'cronie', 'curl', 'wget', 'tar', 'gzip', 'xz')
+            'passwd', 'login', 'kmod', 'lsof', 'psmisc', 'cronie', 'curl', 'wget', 'tar', 'gzip', 'xz'),
+    'dpkg': ('coreutils', 'util-linux', 'procps', 'findutils', 'grep', 'sed', 'gawk', 'mawk', 'bash', 'iproute2', 'net-tools',
+             'openssh-client', 'openssh-server', 'sudo', 'passwd', 'login', 'kmod', 'lsof', 'psmisc', 'cron', 'curl', 'wget',
+             'tar', 'gzip', 'xz-utils', 'libc-bin', 'libc6', 'systemd', 'libpam-modules', 'libpam-runtime', 'polkitd'),
+    'pacman': ('coreutils', 'util-linux', 'procps-ng', 'findutils', 'grep', 'sed', 'gawk', 'bash', 'iproute2', 'net-tools',
+               'openssh', 'sudo', 'shadow', 'pam', 'polkit', 'systemd', 'glibc', 'kmod', 'lsof', 'psmisc', 'cronie', 'curl',
+               'wget', 'tar', 'gzip', 'xz')}.get(PKG, ())
+PROG = re.compile(r'^/(usr/)?(s?bin|lib|lib64|libexec)/')   # program files; config and data change legitimately
 DROP = re.compile(r'^(/tmp/|/var/tmp/|/dev/shm/|/run/user/\d+/|' + re.escape(os.path.expanduser('~/Downloads/')) + ')')
 KTHREAD = re.compile(r'^(kworker|ksoftirqd|kthreadd|migration|rcu_|watchdog|irq/|kswapd|jbd2|kauditd|khungtaskd|oom_reaper|'
                      r'writeback|kcompactd|kblockd|cpuhp|ksmd|khugepaged|scsi_|nvme|kdevtmpfs|netns|kintegrityd|kthrotld)')
 
 
 def rpm_verify(out):
-    """rpm -V output -> (path, problem) for changed or missing program files; config, docs and unreadable files skipped."""
+    """rpm -V / dpkg --verify output -> (path, problem) for changed or missing program files; config, docs and unreadable files skipped."""
     for l in out.splitlines():
         m = re.match(r'^(missing|[.\w?]{9})\s+([cdglr]?)\s+(/\S+)', l)
         if not m or m[2] in ('c', 'd', 'g', 'l', 'r') or 'Permission denied' in l: continue
         flags, path = m[1], m[3]
-        if not re.match(r'^/(usr/)?(s?bin|lib|lib64|libexec)/', path): continue
+        if not PROG.match(path): continue
         if flags == 'missing': yield path, 'missing'
         elif flags[2] == '5': yield path, 'contents changed'
 
 
-def report_verify(out):
-    for path, why in rpm_verify(out):
-        owner = sh('rpm', '-qf', '--qf', '%{NAME}', path).strip()
-        if why == 'missing': yield warn(f'System file missing: {path} ({owner})', f'sudo dnf reinstall {owner}')
-        else: yield alert(f'System program differs from its package: {path} ({owner}): possible trojan',
-                          f'Compare with a clean copy; sudo dnf reinstall {owner} restores it')
+def pacman_verify(out):
+    """pacman -Qkk output (LC_ALL=C) -> (path, problem), like rpm_verify."""
+    seen = set()
+    for pkg, path, why in re.findall(r'^warning: (\S+): (/.+?) \(([^()]+)\)$', out, re.M):
+        why = 'missing' if 'No such file' in why else 'contents changed' if 'checksum' in why or 'Size' in why else ''
+        if why and PROG.match(path) and path not in seen:
+            seen.add(path)
+            yield path, why
+
+
+def verify(pkgs=None):
+    """(path, problem) for program files that differ from their package, in `pkgs` or in every package when None."""
+    if pkgs is not None:   # dpkg and pacman stop at a name that is not installed
+        if PKG == 'dpkg': pkgs = [l[3:] for l in sh('dpkg-query', '-W', '-f', '${db:Status-Abbrev}${binary:Package}\n', *pkgs).splitlines() if l.startswith('ii')]
+        elif PKG == 'pacman': pkgs = sh('pacman', '-Qq', *pkgs).split()
+        if not pkgs: return
+    t = 120 if pkgs else 1800
+    if PKG == 'rpm': yield from rpm_verify(sh('rpm', '-V' if pkgs else '-Va', '--nomtime', '--nouser', '--nogroup', '--nomode', '--nordev', '--nocaps', *pkgs or (), timeout=t))
+    elif PKG == 'dpkg': yield from rpm_verify(sh('dpkg', '--verify', *pkgs or (), timeout=t))
+    elif PKG == 'pacman': yield from pacman_verify(sh('env', 'LC_ALL=C', 'pacman', '-Qkk', *pkgs or (), err=True, timeout=t))
+
+
+def report(found):
+    for path, why in found:
+        pkg = owner(path) or '?'
+        if why == 'missing': yield warn(f'System file missing: {path} ({pkg})', REINSTALL.format(pkg))
+        else: yield alert(f'System program differs from its package: {path} ({pkg}): possible trojan',
+                          f'Compare with a clean copy; {REINSTALL.format(pkg)} restores it')
 
 
 @check('Core system tools', 'Integrity')
 def core_tools():
-    yield from report_verify(sh('rpm', '-V', *CRITICAL, timeout=120))
+    if CRITICAL: yield from report(verify(CRITICAL))
 
 
 @check('All packaged programs', 'Integrity', slow=True)
 def all_packages():
-    # ponytail: rpm -Va reads every packaged file (a few minutes); the quick scan covers the tools attackers swap most.
-    yield from report_verify(sh('rpm', '-Va', '--nomtime', '--nouser', '--nogroup', '--nomode', '--nordev', '--nocaps', timeout=1800))
+    # ponytail: verifying every packaged file takes minutes; the quick scan covers the tools attackers swap most.
+    yield from report(verify())
 
 
 def proc_pids(): return {int(p) for p in os.listdir('/proc') if p.isdigit()}

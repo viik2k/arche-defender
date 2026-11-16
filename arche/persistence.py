@@ -1,7 +1,7 @@
 # Persistence and tampering sweep: the places malware hides to survive a reboot, plus what is exposed right now.
 import glob, json, os, re
 from pathlib import Path
-from .core import HOME, alert, item, ver, sh, text, lines, files, jsonf, check
+from .core import HOME, PKG, alert, item, ver, sh, text, lines, files, jsonf, check, owned
 
 SENSITIVE = 'sudo|su|ssh|pkexec|passwd|doas|run0'
 RC_FILES = ('~/.bashrc', '~/.bash_profile', '~/.bash_login', '~/.profile', '~/.zshrc', '~/.zprofile', '~/.bashrc.d/*',
@@ -20,9 +20,8 @@ def running():
         if drop.match(e): yield alert(f'Running from a drop folder: {e}')
         elif e.endswith(' (deleted)'): yield item(ver(f'Running a replaced binary (restart it after updates): {e}'))
         else: plain.append(e)
-    out = sh('rpm', '-qf', *plain, err=True) if plain else ''
-    for m in re.finditer(r'file (.+?)(?: is not owned by any package|: No such file or directory)$', out, re.M):
-        yield item(ver(f'Not from a package: {m[1]}'))   # /app/... is a Flatpak
+    if PKG:
+        for e in sorted(set(plain) - owned(plain)): yield item(ver(f'Not from a package: {e}'))   # /app/... is a Flatpak
 
 
 @check('Network listeners', 'Network')

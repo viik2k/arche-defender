@@ -55,6 +55,39 @@ def sh(*cmd, err=False, timeout=30):
 def have(cmd): return shutil.which(cmd) is not None
 
 
+# The package manager that owns the system files (None on NixOS, Gentoo...): what verifies them and fixes them.
+PKG = next((m for m, db in (('rpm', '/usr/lib/sysimage/rpm'), ('dpkg', '/var/lib/dpkg/status'),
+                            ('pacman', '/var/lib/pacman/local'), ('rpm', '/var/lib/rpm')) if os.path.exists(db) and have(m)), None)
+UPGRADE, REINSTALL = {'dnf': ('sudo dnf upgrade', 'sudo dnf reinstall {}'), 'zypper': ('sudo zypper update', 'sudo zypper install -f {}'),
+                      'dpkg': ('sudo apt update && sudo apt upgrade', 'sudo apt install --reinstall {}'),
+                      'pacman': ('sudo pacman -Syu', 'sudo pacman -S {}')}.get(
+    'zypper' if PKG == 'rpm' and have('zypper') else 'dnf' if PKG == 'rpm' else PKG, ('install your updates', 'reinstall {}'))
+
+
+def owned(paths):
+    """The subset of `paths` some installed package owns (empty when there is no known package manager)."""
+    paths = list(paths)
+    if not paths or not PKG: return set()
+    if PKG == 'rpm':
+        out = sh('env', 'LC_ALL=C', 'rpm', '-qf', '--qf', '%{NAME}\n', *paths, err=True)
+        return set(paths) - set(re.findall(r'file (/.+?)(?: is not owned by any package|: No such file or directory)$', out, re.M))
+    if PKG == 'pacman': return set(re.findall(r'^(/.+?) is owned by ', sh('env', 'LC_ALL=C', 'pacman', '-Qo', *paths), re.M))
+    # dpkg: usrmerge systems often register /usr/bin/x as /bin/x, so ask for both
+    alt = {p: p.removeprefix('/usr') for p in paths if p.startswith('/usr/')}
+    hit = set(re.findall(r'^[^:\n]+: (/.+)$', sh('dpkg-query', '-S', *paths, *alt.values()), re.M))
+    return {p for p in paths if p in hit or alt.get(p) in hit}
+
+
+def owner(path):
+    """Name of the package that owns `path`, or ''."""
+    if PKG == 'rpm': out = sh('rpm', '-qf', '--qf', '%{NAME}', path)
+    elif PKG == 'pacman': out = sh('pacman', '-Qoq', path)
+    elif PKG == 'dpkg': out = next((l.split(':')[0].split(',')[0] for p in (path, path.removeprefix('/usr'))
+                                    for l in sh('dpkg-query', '-S', p).splitlines() if l.endswith(f': {p}')), '')
+    else: out = ''
+    return '' if 'not owned' in out else out.strip()
+
+
 def text(p):
     try: return Path(p).read_text(errors='replace')
     except OSError: return ''

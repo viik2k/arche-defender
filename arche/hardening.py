@@ -1,22 +1,32 @@
 # Protection status: is the machine's own armour on? Firewall, SELinux, Secure Boot, disk encryption, kernel
 # hardening, login and screen lock, SSH server, and files that hold secrets. Weak settings are WARN with a fix.
 import os, re, stat, time
-from .core import HOME, alert, warn, item, sh, have, text, lines, files, check
+from .core import HOME, PKG, UPGRADE, alert, warn, item, sh, have, text, lines, files, check
 
 INFRA_IF = re.compile(r'^(lo|docker\d*|br-|virbr|veth|tailscale|podman|cni|vnet|wg|zt)')
 
 
 @check('Security posture', 'Protection')
 def security():
-    fw = sh('systemctl', 'is-active', 'firewalld').strip()
-    if fw != 'active': yield alert(f'Firewall (firewalld) is {fw or "missing"}', 'sudo systemctl enable --now firewalld')
-    for db in files('/usr/lib/sysimage/rpm/rpmdb.sqlite', '/var/lib/rpm/rpmdb.sqlite')[:1]:
+    active = lambda u: sh('systemctl', 'is-active', u).strip() == 'active'
+    if not (active('firewalld') or re.search(r'^ENABLED=yes', text('/etc/ufw/ufw.conf'), re.M) or active('nftables')):
+        yield alert('No firewall is on (firewalld, ufw or nftables)',
+                    'sudo systemctl enable --now firewalld' if have('firewall-cmd') else 'sudo ufw enable' if have('ufw') else
+                    {'dpkg': 'sudo apt install ufw && sudo ufw enable', 'pacman': 'sudo pacman -S ufw && sudo systemctl enable --now ufw && sudo ufw enable'}
+                    .get(PKG, 'Install and enable firewalld or ufw'))
+    db = next((p for p in ('/usr/lib/sysimage/rpm/rpmdb.sqlite', '/var/lib/rpm/rpmdb.sqlite', '/var/lib/rpm/Packages')
+               if os.path.exists(p)), None) if PKG == 'rpm' else {'dpkg': '/var/lib/dpkg/status', 'pacman': '/var/lib/pacman/local'}.get(PKG)
+    if db:
         age = int((time.time() - os.path.getmtime(db)) / 86400)
-        if age > 14: yield alert(f'No package updates in {age} days', 'Install updates (Nobara: the Update System app, or sudo dnf upgrade)')
+        if age > 14: yield alert(f'No package updates in {age} days', f'Install updates (your Software/Update app, or {UPGRADE})')
     se = sh('getenforce').strip()
     if se == 'Enforcing': yield item('SELinux: Enforcing')
-    else: yield warn(f'SELinux is {se or "not installed"}: a compromised app is not confined',
-                     'Set SELINUX=enforcing in /etc/selinux/config, then sudo touch /.autorelabel and reboot')
+    elif text('/sys/module/apparmor/parameters/enabled').strip() == 'Y' and se != 'Permissive': yield item('AppArmor: enabled')
+    elif se or os.path.exists('/etc/selinux/config'):
+        yield warn(f'SELinux is {se or "off"}: a compromised app is not confined',
+                   'Set SELINUX=enforcing in /etc/selinux/config, then sudo touch /.autorelabel and reboot')
+    else: yield warn('No SELinux or AppArmor: a compromised app is not confined',
+                     {'dpkg': 'sudo apt install apparmor apparmor-utils, then reboot'}.get(PKG, 'Install AppArmor and add apparmor to the lsm= kernel parameter'))
     sb = sh('mokutil', '--sb-state').strip()
     if 'enabled' in sb: yield item(sb)
     elif sb: yield warn('Secure Boot is disabled: a bootkit or unsigned kernel module can load before the OS',

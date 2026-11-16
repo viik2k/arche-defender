@@ -9,7 +9,9 @@ Python 3 standard library only (plus tkinter for the window). No root needed, no
 the only things that change your system are actions you run yourself (quarantine, restore, the background monitor,
 the threat-intel download).
 
-Built on Nobara (Fedora, KDE Plasma). Fedora-family checks use `rpm`/`dnf`; the rest is plain Linux.
+Built on Nobara (Fedora, KDE Plasma) and written for any systemd desktop: package checks use `rpm` (Fedora, openSUSE),
+`dpkg` (Debian, Ubuntu, Mint, Pop!_OS) or `pacman` (Arch, Manjaro, EndeavourOS), whichever owns the system; the rest is
+plain Linux.
 
 ## Run
 
@@ -30,8 +32,8 @@ printf '[Desktop Entry]\nType=Application\nName=Arche Defender\nExec=%s/arche-de
 On the first run nothing is marked new because there is no baseline. Read through the findings, then click
 **Accept as baseline** (or `--scan --accept`). Later scans mark anything that appeared since in amber.
 
-**Quick scan** takes seconds and skips the slow checks. **Full scan** adds the deep malware scan, `rpm -Va`
-over every packaged file, AI model files, browsing history against threat intel, Flatpak updates and ClamAV/YARA
+**Quick scan** takes seconds and skips the slow checks. **Full scan** adds the deep malware scan, verification of
+every packaged file, AI model files, browsing history against threat intel, Flatpak updates and ClamAV/YARA
 when installed.
 
 ## What it checks
@@ -45,8 +47,8 @@ else in the same check is hidden with it.
 |---|---|
 | Threats | Heuristic and hash scan of the folders droppers use (Downloads, Desktop, /tmp, ~/.local/bin, app launchers), including inside zip archives (lures, password-protected zips holding programs), a deeper scan of Documents, ~/.config, ~/.local/share and /opt, suspicious running processes, ClamAV/YARA, connections and browsing history matched against offline threat-intel feeds; Windows programs in Wine, Proton, Bottles, Lutris and Heroic prefixes (hash-checked, plus their Run keys, Startup folders and Temp) |
 | AI agents | Claude Code, Codex, Gemini CLI, Cursor, VS Code, Windsurf, Cline, Continue, Zed and friends: plugins, marketplaces, skills, hooks and MCP servers; skill and plugin files scanned for hidden Unicode instructions, prompt injection, credential theft and malicious commands; agents allowed to run without asking, or running right now with approvals off; unpinned `npx`/`uvx` MCP servers; plaintext API keys (the value is never shown); Ollama/LM Studio/ComfyUI open to the network; repos that auto-run tasks or hooks; pickle model files that run code when loaded |
-| Protection | firewalld zones and open port ranges, update age, SELinux, Secure Boot, disk encryption, kernel sysctls, autologin and screen lock, passwordless sudo, sshd config, permissions on SSH keys and token files, passphrase-less keys, setuid/setgid programs and file capabilities, Chromium/Electron apps running with their sandbox off |
-| Integrity | `rpm -V` on the tools attackers swap (ls, ps, ss, sudo, sshd…), processes and kernel modules hidden from `/proc`, processes posing as kernel threads, code loaded from temp folders, LD_PRELOAD injection, promiscuous network cards, kernel taint |
+| Protection | a firewall is on (firewalld, ufw or nftables), firewalld zones and open port ranges, update age, SELinux or AppArmor, Secure Boot, disk encryption, kernel sysctls, autologin and screen lock, passwordless sudo, sshd config, permissions on SSH keys and token files, passphrase-less keys, setuid/setgid programs and file capabilities, Chromium/Electron apps running with their sandbox off |
+| Integrity | the package manager's own checksums (`rpm -V`, `dpkg --verify`, `pacman -Qkk`) on the tools attackers swap (ls, ps, ss, sudo, sshd…), processes and kernel modules hidden from `/proc`, processes posing as kernel threads, code loaded from temp folders, LD_PRELOAD injection, promiscuous network cards, kernel taint |
 | Persistence | XDG autostart, Plasma scripts, shell rc files, systemd timers and services, cron, udev rules, ld.so.preload, PAM, shadowed sudo/ssh, browser extensions and native messaging hosts, out-of-tree kernel modules |
 | Network | listening programs, hosts file, DNS, proxies, remote-desktop tools, SSH keys, shares, accounts; root certificates added to the system or to NSS/Firefox stores (a rogue one can read all HTTPS); saved open, WEP or WPA1 Wi-Fi that joins automatically |
 | Processes | programs running from temp or download folders, memfd, deleted binaries, executables no package owns |
