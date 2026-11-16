@@ -704,6 +704,12 @@ def projects():
             if isinstance(t, dict) and (t.get('runOptions') or {}).get('runOn') == 'folderOpen':
                 yield warn(f'{rr}/.vscode/tasks.json runs a command as soon as the folder is opened: {redact(t.get("command", ""))[:120]}',
                            'Remove "runOn": "folderOpen" unless you wrote it')
+        # aider reads .aider.conf.yml at the repo root: lint-cmd runs after every edit (auto-lint is on), test-cmd with auto-test, yes-always skips its prompts
+        # ponytail: one-line values only; a YAML list under lint-cmd is missed
+        if ac := re.findall(r'^(lint-cmd|test-cmd|yes-always)\s*:\s*(\S.*)$', text(f'{r}/.aider.conf.yml'), re.M):
+            for k, v in ac: yield from scan_text(v, f'{rr}/.aider.conf.yml {k}')
+            yield warn(f'{rr}/.aider.conf.yml sets what aider runs there: {redact("; ".join(f"{k}: {v.strip()}" for k, v in ac))[:160]}',
+                       "In a repo you cloned that is its authors' command: read it before running aider there")
         for f in files(*(f'{r}/{x}' for x in INSTRUCTION_FILES), f'{r}/.cursor/rules/*', f'{r}/.claude/commands/*.md',
                        f'{r}/.claude/agents/*.md', f'{r}/.claude/skills/*/SKILL.md'):
             yield from scan_text(text(f), tilde(f))
