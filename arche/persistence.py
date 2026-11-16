@@ -171,26 +171,38 @@ CHROMIUM = (('Chrome', 'google-chrome', 'com.google.Chrome'), ('Chromium', 'chro
             ('Vivaldi', 'vivaldi', 'com.vivaldi.Vivaldi'), ('Helium', 'net.imput.helium', 'net.imput.helium'))
 
 
+def chromium_roots(): return [(n, r) for n, sub, flat in CHROMIUM for r in (f'{HOME}/.config/{sub}', f'{HOME}/.var/app/{flat}/config/{sub}')]
+
+
+def chromium_extensions():
+    """(browser, title, extension id, manifest) for every Chromium-family extension installed for this user."""
+    for name, root in chromium_roots():
+        for mf in files(f'{root}/*/Extensions/*/*/manifest.json'):
+            j, d = jsonf(mf), os.path.dirname(mf)
+            title = j.get('name', '?')
+            if m := re.match(r'^__MSG_(.+)__$', title):
+                for loc in files(*(f'{d}/_locales/{x}/messages.json' for x in ('en', 'en_US', 'en_GB')))[:1]:
+                    msgs = {k.lower(): v for k, v in jsonf(loc).items()}
+                    title = msgs.get(m[1].lower(), {}).get('message') or title
+            yield name, title, Path(d).parent.name, j
+
+
+def firefox_addons():
+    """extensions.json entries for the add-ons this user installed in Firefox."""
+    for ext in files('~/.mozilla/firefox/*/extensions.json', '~/.config/mozilla/firefox/*/extensions.json',
+                     '~/.var/app/org.mozilla.firefox/.mozilla/firefox/*/extensions.json'):
+        yield from (a for a in jsonf(ext).get('addons', []) if isinstance(a, dict) and a.get('location') == 'app-profile')
+
+
 @check('Browser extensions', 'Persistence')
 def browsers():
     hosts = ['/etc/opt/chrome/native-messaging-hosts', '/etc/chromium/native-messaging-hosts', '/etc/opt/edge/native-messaging-hosts',
              '~/.mozilla/native-messaging-hosts', '/usr/lib64/mozilla/native-messaging-hosts', '/usr/lib/mozilla/native-messaging-hosts']
-    for name, sub, flat in CHROMIUM:
-        for root in (f'{HOME}/.config/{sub}', f'{HOME}/.var/app/{flat}/config/{sub}'):
-            hosts.append(f'{root}/NativeMessagingHosts')
-            for mf in files(f'{root}/*/Extensions/*/*/manifest.json'):
-                j, d = jsonf(mf), os.path.dirname(mf)
-                title = j.get('name', '?')
-                if m := re.match(r'^__MSG_(.+)__$', title):
-                    for loc in files(*(f'{d}/_locales/{x}/messages.json' for x in ('en', 'en_US', 'en_GB')))[:1]:
-                        msgs = {k.lower(): v for k, v in jsonf(loc).items()}
-                        title = msgs.get(m[1].lower(), {}).get('message') or title
-                wide = ' (all sites)' if re.search(r'<all_urls>|\*://\*/|https?://\*/', f'{j.get("permissions")} {j.get("host_permissions")}') else ''
-                yield item(f'{name}: {title} [{Path(d).parent.name}]{wide}')
-    for ext in files('~/.mozilla/firefox/*/extensions.json', '~/.config/mozilla/firefox/*/extensions.json',
-                     '~/.var/app/org.mozilla.firefox/.mozilla/firefox/*/extensions.json'):
-        for a in jsonf(ext).get('addons', []):
-            if a.get('location') == 'app-profile': yield item(f'Firefox: {(a.get("defaultLocale") or {}).get("name")} [{a.get("id")}]')
+    hosts += [f'{r}/NativeMessagingHosts' for _, r in chromium_roots()]
+    for name, title, eid, j in chromium_extensions():
+        wide = ' (all sites)' if re.search(r'<all_urls>|\*://\*/|https?://\*/', f'{j.get("permissions")} {j.get("host_permissions")}') else ''
+        yield item(f'{name}: {title} [{eid}]{wide}')
+    for a in firefox_addons(): yield item(f'Firefox: {(a.get("defaultLocale") or {}).get("name")} [{a.get("id")}]')
     for h in files(*(f'{d}/*.json' for d in hosts)):
         yield item(ver(f'Native host: {Path(h).stem} -> {jsonf(h).get("path")}'))
 

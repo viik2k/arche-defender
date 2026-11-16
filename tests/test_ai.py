@@ -120,5 +120,17 @@ def test_desktop_extension():
     assert sorted(s for t, s, _ in cont if t.startswith('agent memory')) == [1, 2], cont
 
 
+def test_chat_readers():
+    from arche import ai, persistence
+    real = persistence.chromium_extensions, persistence.firefox_addons
+    persistence.chromium_extensions = lambda: [('Chrome', 'AI Sidebar', 'abc', {'content_scripts': [{'matches': ['https://chatgpt.com/*', 'https://claude.ai/*']}]}),
+                                               ('Chrome', 'uBlock', 'def', {'host_permissions': ['<all_urls>']})]
+    persistence.firefox_addons = lambda: [{'id': 'x@y', 'defaultLocale': {'name': 'Gem'}, 'userPermissions': {'origins': ['*://gemini.google.com/*']}}]
+    try: rows = list(ai.chat_readers())
+    finally: persistence.chromium_extensions, persistence.firefox_addons = real
+    assert [(t.split(' is ')[0], s) for t, s, _ in rows] == [('Chrome extension AI Sidebar [abc]', 1), ('Firefox extension Gem [x@y]', 1)], rows
+    assert 'chatgpt.com, claude.ai' in rows[0][0]
+
+
 if __name__ == '__main__':
-    test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

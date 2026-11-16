@@ -402,6 +402,24 @@ def extension_code():
                             'Remove the extension, then rotate GitHub, npm and Open VSX tokens and move any crypto wallet funds')
 
 
+AI_CHAT = re.compile(r'chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|bard\.google\.com|copilot\.microsoft\.com|'
+                     r'perplexity\.ai|chat\.deepseek\.com|grok\.com|chat\.mistral\.ai|poe\.com|meta\.ai|chat\.qwen\.ai|aistudio\.google\.com')
+
+
+@check('Extensions that read AI chats', FAM)
+def chat_readers():
+    # "Prompt poaching": AI sidebars and free VPNs that inject into the chat sites to copy every conversation.
+    # ponytail: named chat sites only; an all-sites extension can read them too but is listed under Browser extensions.
+    from .persistence import chromium_extensions, firefox_addons
+    exts = [(b, t, eid, json.dumps([j.get('host_permissions'), j.get('permissions'), [c.get('matches') for c in j.get('content_scripts') or []
+                                                                                     if isinstance(c, dict)]])) for b, t, eid, j in chromium_extensions()]
+    exts += [('Firefox', (a.get('defaultLocale') or {}).get('name'), a.get('id'), json.dumps(a.get('userPermissions'))) for a in firefox_addons()]
+    for browser, title, eid, perms in exts:
+        if sites := sorted(set(AI_CHAT.findall(perms))):
+            yield warn(f'{browser} extension {title} [{eid}] is built to read {", ".join(sites)}: it sees every prompt, reply and file you share there',
+                       'Remove it unless you trust its maker with your AI conversations')
+
+
 def repos():
     roots = {os.path.realpath(p) for p in jsonf(f'{HOME}/.claude.json').get('projects', {}) if os.path.isdir(p) and p != HOME}
     for d, dirs, _ in os.walk(HOME):
