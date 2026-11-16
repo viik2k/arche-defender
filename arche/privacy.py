@@ -300,10 +300,32 @@ def crash_rows(entries, uid, exists=os.path.exists):
                    f'(it can hold passwords and sign-in cookies)', fix='Delete it: sudo rm ' + ' '.join(fs))
 
 
+CRASH_HANDLERS = {'systemd-coredump', 'apport', 'abrt-hook-ccpp', 'false', 'true', 'crash_reporter'}
+
+
+def core_pattern_rows(pattern, stat=os.stat):
+    """kernel.core_pattern '|prog' makes the kernel run prog as root on every crash: a classic root backdoor."""
+    if not pattern.startswith('|'): return
+    prog = (pattern[1:].split() or [''])[0]
+    try: st = stat(prog)
+    except OSError: st = None
+    system = re.match(r'/(usr/)?(s?bin|lib(64|exec)?|share)/', prog)
+    if not st or not system or st.st_uid != 0 or st.st_mode & 0o022:
+        yield alert(f'Every crash runs {prog} as root (kernel.core_pattern), ' + ('and that file is missing' if not st else
+                    'and it can be changed without root' if st.st_uid != 0 or st.st_mode & 0o022 else 'from outside the system folders'),
+                    fix='Unless you set this up, it is a way to run code as root: sudo sysctl kernel.core_pattern=core, then remove '
+                        'the line that sets it from /etc/sysctl.d/ and /etc/sysctl.conf, and quarantine the file.')
+    elif os.path.basename(prog) not in CRASH_HANDLERS:
+        yield warn(f'Every crash runs {prog} as root (kernel.core_pattern), which is not a known crash reporter',
+                   fix='If you did not install a crash reporter that uses it, reset it: sudo sysctl kernel.core_pattern=core, and '
+                       'remove the line that sets it from /etc/sysctl.d/.')
+
+
 @check('Crash dumps', 'Privacy')
 def crashes():
-    """Secrets in the environment of crashed programs, which the journal keeps, and memory dumps of browsers, password managers
-    and chat apps left on disk."""
+    """Secrets in the environment of crashed programs, which the journal keeps, memory dumps of browsers, password managers
+    and chat apps left on disk, and the crash handler the kernel runs as root."""
+    yield from core_pattern_rows(text('/proc/sys/kernel/core_pattern').strip())
     out = sh('journalctl', '-q', '--all', '--no-pager', f'MESSAGE_ID={COREDUMP_ID}', '-o', 'json',
              '--output-fields=COREDUMP_EXE,COREDUMP_UID,COREDUMP_ENVIRON,COREDUMP_FILENAME', timeout=60)
     entries = []

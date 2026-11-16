@@ -4,7 +4,7 @@ import base64, shutil, tempfile, unittest
 from unittest import mock
 from pathlib import Path
 from arche import privacy
-from arche.core import WARN, INFO
+from arche.core import ALERT, WARN, INFO
 
 PERMS = """[Context]
 shared=network;ipc;
@@ -212,3 +212,18 @@ class Sensitive(unittest.TestCase):
         t, s = '\t \n' * 300000 + 'url', time.time()
         privacy.sensitive('driveline', t)
         self.assertLess(time.time() - s, 1)
+
+
+class CorePattern(unittest.TestCase):
+    def test_handlers(self):
+        def stat(p):
+            if p == '/tmp/x': raise OSError
+            return os.stat_result((0o100777 if 'open' in p else 0o100755, 0, 0, 1, 0 if 'mine' not in p else 1000, 0, 0, 0, 0, 0))
+        rows = lambda pat: [(s, t.split(', ', 1)[-1]) for t, s, _ in privacy.core_pattern_rows(pat, stat)]
+        for pat in ('core', '|/usr/lib/systemd/systemd-coredump %P %u', '|/usr/share/apport/apport -p%p', '|/bin/false'):
+            self.assertEqual(rows(pat), [], pat)
+        self.assertEqual(rows('|/tmp/x %p'), [(ALERT, 'and that file is missing')])
+        self.assertEqual(rows('|/usr/local/bin/h'), [(ALERT, 'from outside the system folders')])
+        self.assertEqual(rows('|/usr/bin/open-h'), [(ALERT, 'and it can be changed without root')])
+        self.assertEqual(rows('|/usr/bin/mine-h'), [(ALERT, 'and it can be changed without root')])
+        self.assertEqual(rows('|/usr/libexec/vendor-crash'), [(WARN, 'which is not a known crash reporter')])
