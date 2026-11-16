@@ -45,7 +45,7 @@ else in the same check is hidden with it.
 
 | Family | What it looks at |
 |---|---|
-| Threats | Heuristic and hash scan of the folders droppers use (Downloads, Desktop, /tmp, ~/.local/bin, app launchers), including inside zip archives (lures, password-protected zips holding programs), a deeper scan of Documents, ~/.config, ~/.local/share and /opt, suspicious running processes, ClamAV/YARA, connections and browsing history matched against offline threat-intel feeds; Windows programs in Wine, Proton, Bottles, Lutris and Heroic prefixes (hash-checked, plus their Run keys, Startup folders and Temp) |
+| Threats | Heuristic and hash scan of the folders droppers use (Downloads, Desktop, /tmp, ~/.local/bin, app launchers), including inside zip archives (lures, password-protected zips holding programs), a deeper scan of Documents, ~/.config, ~/.local/share and /opt, suspicious running processes, ClamAV/YARA, connections and browsing history matched against offline threat-intel feeds; Windows programs in Wine, Proton, Bottles, Lutris and Heroic prefixes (hash-checked, plus their Run keys, Startup folders and Temp); ransom notes, and opt-in ransomware tripwire files that alarm when anything rewrites or renames them |
 | AI agents | Claude Code, Codex, Gemini CLI, Cursor, VS Code, Windsurf, Cline, Continue, Zed and friends: plugins, marketplaces, skills, hooks and MCP servers; skill and plugin files scanned for hidden Unicode instructions, prompt injection, credential theft and malicious commands; agents allowed to run without asking, or running right now with approvals off; unpinned `npx`/`uvx` MCP servers; plaintext API keys (the value is never shown); Ollama/LM Studio/ComfyUI open to the network; repos that auto-run tasks or hooks; pickle model files that run code when loaded |
 | Protection | a firewall is on (firewalld, ufw or nftables), firewalld zones and open port ranges, update age, SELinux or AppArmor, Secure Boot, disk encryption, kernel sysctls, autologin and screen lock, passwordless sudo, sshd config, permissions on SSH keys and token files, passphrase-less keys, setuid/setgid programs and file capabilities, Chromium/Electron apps running with their sandbox off |
 | Integrity | the package manager's own checksums (`rpm -V`, `dpkg --verify`, `pacman -Qkk`) on the tools attackers swap (ls, ps, ss, sudo, sshd…), processes and kernel modules hidden from `/proc`, processes posing as kernel threads, code loaded from temp folders, LD_PRELOAD injection, promiscuous network cards, kernel taint |
@@ -81,6 +81,7 @@ Also in the window's **Tools** menu.
 |---|---|
 | `intel-update` | downloads the threat-intel feeds; the only network access the tool makes |
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
+| `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
 | `ignore "Check: text"` / `unignore "Check: text"` / `ignored` | hide one finding for good (in the window: right-click it), show it again, list them |
 

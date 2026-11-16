@@ -3,9 +3,9 @@
 # How long since the last update is hardening.py's 'Security posture'; this module covers what is still waiting.
 import configparser, json, os, re, time
 from datetime import date
-from .core import check, alert, warn, item, sh, have, text, files, HOME
+from .core import check, alert, warn, item, sh, have, text, files, HOME, UPGRADE as UPGRADE_CMD
 
-UPGRADE = 'Update with the Nobara updater or: sudo dnf upgrade --refresh'
+UPGRADE = f'Update with your desktop\'s updater or: {UPGRADE_CMD}'
 
 
 def os_release(): return dict(re.findall(r'^(\w+)="?([^"\n]*)"?$', text('/etc/os-release'), re.M))
