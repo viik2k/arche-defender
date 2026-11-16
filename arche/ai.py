@@ -700,16 +700,20 @@ def chat_secrets():
         if len(hits) > 10: yield warn(f'{len(hits) - 10} more {app} conversations hold keys in plain text', tip)
 
 
-# What a prompt-injected agent does with its shell: send a key file, the environment or a browser's saved logins off the PC.
-NET_TOOL = re.compile(r'\b(curl|wget|nc|ncat|netcat|socat|scp|rsync|sftp|ftp|telnet|xh|https?|Invoke-WebRequest|iwr)\b')
-SECRET_PATH = re.compile(r'\.ssh/id_[\w-]+(?!\.pub)\b|\.aws/credentials|\.netrc\b|\.git-credentials|\.claude/\.credentials\.json|'
-                         r'\.codex/auth\.json|\.config/gh/hosts\.yml|\.kube/config|\.docker/config\.json|\.gnupg/|\.password-store|'
-                         r'(?<![\w.])\.env\b|wallet\.dat|Login Data|logins\.json|key4\.db|cookies\.sqlite')
-DROP_HOST = re.compile(r'webhook\.site|requestbin|pipedream\.net|interact\.sh|\.oast\.|burpcollaborator|ngrok(-free)?\.(io|app|dev)|'
-                       r'transfer\.sh|paste(bin\.com|\.ee)|hastebin|0x0\.st|discord(app)?\.com/api/webhooks|api\.telegram\.org/bot')
+# What a prompt-injected agent does with its shell: send a key file, the environment or saved logins off the PC.
+SECRET_PATH = re.compile(r'\.ssh/id_[\w-]+\b(?!\.pub)|\.ssh/?(?=[\s"\']|$)|\.aws/credentials|\.netrc\b|\.git-credentials|'
+                         r'\.claude/\.credentials\.json|\.codex/auth\.json|\.config/gh/hosts\.yml|\.kube/config|\.docker/config\.json|'
+                         r'\.gnupg\b|\.password-store|(?<![\w.])\.env(?:\.(?!example|sample|template|dist)\w+)?(?![\w.])|wallet\.dat|Login Data|logins\.json|key4\.db|cookies\.sqlite')
+SEND = re.compile(r'(@|<\s*|(?:-T|--upload-file|--post-file|--body-file)[=\s]+|\$\(\s*(?:cat|base64|head|tail|xxd)\s[^)]*?)["\']?\S*?'
+                  r'(?P<p>' + SECRET_PATH.pattern + ')')
+# ponytail: Discord webhooks and Telegram bots left out, homelab alerting posts to them too; known-bad hosts come from threat intel
+DROP_HOST = re.compile(r'webhook\.site|requestbin|pipedream\.net|interact\.sh|\.oast\.\w+|burpcollaborator|ngrok(-free)?\.(io|app|dev)|'
+                       r'transfer\.sh|0x0\.st|pastebin\.com|paste\.ee|hastebin')
+NET = {'curl', 'wget', 'nc', 'ncat', 'netcat', 'socat', 'scp', 'rsync', 'sftp', 'ftp', 'xh', 'http', 'https', 'telnet'}
+READERS = {'cat', 'base64', 'tar', 'gzip', 'zip', 'xz', 'zstd', 'xxd', 'od', 'gpg', 'openssl', 'head', 'tail', 'strings'}
+HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?[^\n]*\n.*?\n\s*\1[ \t]*(?=\n|$)", re.S)
 SHELL_TOOLS = {'Bash', 'shell', 'exec_command', 'run_shell_command', 'local_shell', 'exec', 'bash', 'execute_command', 'terminal'}
-EXFIL_HINT = re.compile(rb'\.ssh/id_|credentials|\.netrc|\.env|\.gnupg|password-store|wallet\.dat|Login Data|logins\.json|key4\.db|'
-                        rb'cookies\.sqlite|printenv|env \||' + DROP_HOST.pattern.encode())
+NET_HINT = re.compile(rb'\b(curl|wget|nc|ncat|netcat|socat|scp|rsync|sftp|ftp|xh|https?|telnet)\s')
 
 
 def shell_commands(obj):
@@ -717,24 +721,43 @@ def shell_commands(obj):
     if isinstance(obj, list):
         for x in obj: yield from shell_commands(x)
     if not isinstance(obj, dict): return
-    if obj.get('name') in SHELL_TOOLS or obj.get('type') == 'local_shell_call':
+    if str(obj.get('name')) in SHELL_TOOLS or obj.get('type') == 'local_shell_call':
         p = obj.get('input') or obj.get('args') or obj.get('arguments') or obj.get('action') or {}
         if isinstance(p, str):
             try: p = json.loads(p)
             except ValueError: p = {'command': p}
         c = (p.get('command') or p.get('cmd') or '') if isinstance(p, dict) else ''
-        if c: yield ' '.join(map(str, c)) if isinstance(c, list) else str(c)
+        if isinstance(c, list):   # Codex: ["bash", "-lc", "the command"]
+            c = c[2] if len(c) > 2 and os.path.basename(str(c[0])) in ('bash', 'sh', 'zsh') else ' '.join(map(str, c))
+        if c: yield str(c)
     for v in obj.values():
         if isinstance(v, (dict, list)): yield from shell_commands(v)
 
 
+def tool(stage):
+    """The program a pipeline stage runs, past sudo, nohup and VAR=value."""
+    w = stage.split()
+    while w and (w[0] in ('sudo', 'nohup', 'command', 'exec', 'time') or re.match(r'\w+=', w[0]) or w[0] == 'env' and len(w) > 1 and '=' in w[1]): w.pop(0)
+    return os.path.basename(w[0].strip('(\'"')) if w else ''
+
+
 def exfil(cmd):
-    """What a shell command sends off the PC, or None. Judged per statement, so `cat x && curl y` is two."""
-    for st in re.split(r'\n|;|&&|\|\|', cmd):
-        if not NET_TOOL.search(st): continue
-        if m := SECRET_PATH.search(st): return m[0].strip('/')
-        if re.match(r'\s*(env|printenv)\b[^|]*\|', st): return 'your environment variables (API keys included)'
-        if m := DROP_HOST.search(st): return f'data to {m[0]} (a throwaway drop host)'
+    """(what, severity, the stage that sends it) for a shell command that sends a secret or data to a drop host, else None."""
+    for line in re.split(r'\n|;|&&|\|\|', HEREDOC.sub('\n', cmd)):   # a heredoc's body is a script's text, not commands
+        stages = [(tool(s), s) for s in line.split('|')]
+        for i, (t, s) in enumerate(stages):
+            if t not in NET: continue
+            if m := SEND.search(s): return m['p'].strip('/'), ALERT, s
+            args = s.split()[1:]
+            if t in ('scp', 'rsync', 'sftp') and any(':' in a for a in args):
+                if p := next((m[0] for a in args if ':' not in a and not a.startswith('-') and (m := SECRET_PATH.search(a))), None):
+                    return p.strip('/'), ALERT, s
+            for bt, bs in stages[:i]:
+                if bt in ('env', 'printenv') and len(bs.split()) == 1: return 'all your environment variables (API keys included)', ALERT, line
+                if bt in READERS and (m := SECRET_PATH.search(bs)): return m[0].strip('/'), ALERT, line
+            if m := DROP_HOST.search(s): return f'data to {m[0]} (a throwaway drop host)', WARN, s
+            for h in re.findall(r'https?://([\w.-]+)', s):
+                if domain_hit and (hit := domain_hit(h)): return f'data to {h}, a known-bad host ({hit})', ALERT, s
 
 
 @check('AI agent commands', FAM, slow=True)
@@ -748,17 +771,18 @@ def agent_commands():
                 with open(f, 'rb') as fh: rows = fh.read(256 << 20).splitlines() if f.endswith('.jsonl') else [fh.read(64 << 20)]
             except OSError: continue
             for row in rows:
-                if not EXFIL_HINT.search(row): continue
+                if not NET_HINT.search(row): continue
                 try: entry = json.loads(row)
                 except ValueError: continue
                 for c in shell_commands(entry):
-                    if (what := exfil(c)) and c not in seen:
-                        seen.add(c); hits.append((os.path.getmtime(f), app, f, what, c))
-    for _, app, f, what, c in sorted(hits, reverse=True)[:10]:
-        yield warn(f'{app} ran a command that sends {what} off this PC ({tilde(f)}): {redact(c)[:140]}',
-                   'If you did not ask for it, the agent was likely prompt-injected: rotate that secret, and read what the session '
-                   'opened just before (a web page, an issue, a file) to find the injection')
-    if len(hits) > 10: yield warn(f'{len(hits) - 10} more agent commands sent secrets off this PC')
+                    if c not in seen and (x := exfil(c)):
+                        seen.add(c); hits.append((x[1], os.path.getmtime(f), app, f, *x))
+    for sev, _, app, f, what, _, stage in sorted(hits, reverse=True)[:10]:
+        yield (alert if sev == ALERT else warn)(
+            f'{app} ran a command that sends {what} off this PC ({tilde(f)}): {redact(" ".join(stage.split()))[:140]}',
+            'If you did not ask for it, the agent was likely prompt-injected: rotate that secret, and read what the session '
+            'opened just before (a web page, an issue, a file) to find the injection')
+    if len(hits) > 10: yield warn(f'{len(hits) - 10} more agent commands like these')
 
 
 HF_HUB = os.path.join(os.environ.get('HF_HOME') or f'{HOME}/.cache/huggingface', 'hub')

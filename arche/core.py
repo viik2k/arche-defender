@@ -167,9 +167,10 @@ def _ignored():
 
 
 def score(results):
-    """0-100 health score for the headline: alerts cost most, weak settings less, unreviewed changes a little."""
-    rows = [r for rs in results.values() for r in rs]
-    return max(0, 100 - 15 * sum(r.sev == ALERT for r in rows) - 4 * sum(r.sev == WARN for r in rows) - sum(r.new for r in rows))
+    """0-100 health score for the headline: alerts cost most, weak settings less, unreviewed changes a little.
+    Warnings and changes are capped per check, so one noisy area cannot zero the score and fixing a check visibly moves it."""
+    return max(0, 100 - sum(15 * sum(r.sev == ALERT for r in rs) + min(8, 4 * sum(r.sev == WARN for r in rs)) +
+                            min(3, sum(r.new for r in rs)) for rs in results.values()))
 
 
 def stamp(): return time.strftime('%Y-%m-%d %H:%M:%S')
