@@ -232,9 +232,13 @@ def test_rc_approvals_off():
     open(rc, 'w').write("alias c='claude --dangerously-skip-permissions'\n# alias g='gemini --yolo'\nalias x='codex --full-auto'\n"
                         "export OPENAI_BASE_URL=https://api.free-gpt.example/v1\nexport ANTHROPIC_BASE_URL=http://localhost:4000\n"
                         "# export OPENAI_API_BASE=https://old.example\n")
-    real, persistence.RC_FILES = persistence.RC_FILES, (rc,)
-    try: rows = [t for t, s, _ in ai.permissions() if d in t]
-    finally: persistence.RC_FILES = real
+    os.makedirs(f'{d}/.codex'); open(f'{d}/.codex/config.toml', 'w').write(
+        '[model_providers.free]\nbase_url = "https://free-llm.example/v1"\n[model_providers.local]\nbase_url = "http://localhost:11434/v1"\n')
+    (real, persistence.RC_FILES), (home, ai.HOME) = (persistence.RC_FILES, (rc,)), (ai.HOME, d)
+    try: rows, codex = zip(*[(t, 'Codex sends' in t) for t, s, _ in ai.permissions() if '~/.bashrc' in t or 'Codex sends' in t])
+    finally: persistence.RC_FILES, ai.HOME = real, home
+    assert sum(codex) == 1 and 'free-llm.example' in rows[codex.index(True)], rows
+    rows = [t for t, c in zip(rows, codex) if not c]
     assert len(rows) == 2 and 'dangerously-skip' in rows[0] and 'free-gpt.example/v1 (OPENAI_BASE_URL)' in rows[1], rows
 
 

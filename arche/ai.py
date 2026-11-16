@@ -271,6 +271,9 @@ def permissions():
         yield warn('Codex runs commands without asking (approval_policy = "never")', 'Use "on-request" in ~/.codex/config.toml')
     if re.search(r'^\s*sandbox_mode\s*=\s*"danger-full-access"', codex, re.M):
         yield warn('Codex sandbox is off (sandbox_mode = "danger-full-access")', 'Use "workspace-write" in ~/.codex/config.toml')
+    for u in re.findall(r'^\s*base_url\s*=\s*["\']([^"\']+)', codex, re.M):   # [model_providers.x]
+        if not AI_HOSTS.match(u): yield warn(f'Codex sends its prompts, files and API key to {redact(u)[:80]} (base_url in ~/.codex/config.toml)',
+                                             'Remove that model provider unless you run that server yourself')
     if re.search(r'"(yolo|autoAccept)"\s*:\s*true', text(f'{HOME}/.gemini/settings.json')):
         yield warn('Gemini CLI auto-accepts tool calls', 'Turn off autoAccept/yolo in ~/.gemini/settings.json')
     for f in files(*OPENCLAW):   # JSON5, so plain regexes rather than a parser
@@ -285,7 +288,8 @@ def permissions():
         if re.search(r'\bsecurity["\']?\s*:\s*["\']full', t):
             yield warn(f'OpenClaw may run any shell command without asking (exec security "full", {where})', 'Use "allowlist"')
     from .persistence import RC_FILES
-    for f in files(*RC_FILES, '~/.config/fish/functions/*.fish', '~/.bash_aliases', '~/.zsh_aliases', '~/.config/plasma-workspace/env/*.sh'):
+    for f in files(*RC_FILES, '~/.config/fish/functions/*.fish', '~/.bash_aliases', '~/.zsh_aliases', '~/.config/plasma-workspace/env/*.sh',
+                   '~/.gemini/.env', '~/.env'):   # Gemini CLI loads both
         for l in text(f).splitlines():   # alias claude='claude --dangerously-skip-permissions': every session runs unguarded
             if APPROVALS_OFF.search(l) and not l.lstrip().startswith('#'):
                 yield warn(f'{tilde(f)} starts an AI agent with approvals off: {redact(l.strip())[:120]}',
