@@ -68,9 +68,10 @@ Without root it cannot see other users' processes, `/root`, sudoers or the sshd 
 ```
 
 It runs at the lowest CPU and disk priority and sends a desktop notification only for findings it has not told you
-about yet. A systemd `.path` unit also watches Downloads, Desktop, `~/.local/bin`, `~/.config/autostart` and your user
-services, and re-runs just the matching checks a few seconds after anything changes there: a malicious download or a new
-autostart entry is reported within seconds, with no daemon running in between.
+about yet. Folder watches (systemd `.path` units) also re-run just the matching check within seconds of a change:
+Downloads, Desktop and `~/.local/bin` (dropped files), autostart, user services, D-Bus services and launchers (persistence),
+and Documents and Pictures (the ransomware tripwire, which runs at normal priority so a busy disk cannot delay it). No
+daemon runs in between.
 
 ## Actions
 

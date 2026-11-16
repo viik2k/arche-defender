@@ -1,17 +1,20 @@
 # Background monitor: a systemd user timer runs a quick scan every hour (a full one once a week) and shows a desktop
-# notification for alerts, warnings and new items it has not told you about yet. A .path unit also re-runs the few
-# checks for Downloads and autostart within seconds of something landing there. Nothing runs as root.
-import json, os, sys, time
+# notification for alerts, warnings and new items it has not told you about yet. Folder watches (.path units) also
+# re-run single checks within seconds of a change in Downloads, autostart, Documents... Nothing runs as root.
+import json, os, re, sys, time
 from pathlib import Path
-from .core import STATE, ALERT, action, jsonf, write_private, sh, have, load_baseline, stamp, record
+from .core import STATE, ALERT, CHECKS, action, jsonf, write_private, sh, have, load_baseline, stamp, record
 
 UNITS = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'systemd/user'
 SEEN = STATE / 'notified.json'
 LAUNCHER = Path(__file__).resolve().parent / '__main__.py'   # works from a git checkout and from a pipx install
 WEEK = 7 * 86400
-# Folders watched for changes, and the checks a change re-runs: near-real-time download and persistence scanning, no daemon.
-WATCH = {'%h/Downloads': 'Dropped files', '%h/Desktop': 'Dropped files', '%h/.local/bin': 'Dropped files',
-         '%h/.config/autostart': 'Startup entries', '%h/.config/systemd/user': 'Services'}
+# Check -> folders whose change re-runs it within seconds (one .path unit each, not recursive): near-real-time
+# download, persistence and ransomware detection with no daemon.
+WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'), 'Startup entries': ('%h/.config/autostart',),
+         'Services': ('%h/.config/systemd/user',), 'Ransomware tripwire': ('%h/Documents', '%h/Pictures'),
+         'Command hooks': ('%h/.local/share/dbus-1/services', '%h/.local/share/applications', '%h/.local/share/kio/servicemenus')}
+URGENT = {'Ransomware tripwire'}   # runs at once and at normal priority: encryption saturates the disk, idle I/O would starve it
 
 
 def fresh_findings(res, told):
@@ -45,6 +48,13 @@ def run(only=None):
     return 0
 
 
+def drop_watches():
+    """Stop and delete every folder-watch unit (also ones from older versions or checks that no longer exist)."""
+    old = sorted(p.name for p in UNITS.glob('arche-defender-watch*'))
+    if old: sh('systemctl', '--user', 'disable', '--now', *old)
+    for u in old: (UNITS / u).unlink(missing_ok=True)
+
+
 @action('install-monitor', 'scan in the background every hour (full scan weekly) and notify about new findings')
 def install():
     UNITS.mkdir(parents=True, exist_ok=True)
@@ -68,30 +78,25 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 ''')
-    only = ' '.join(f'--only "{c}"' for c in dict.fromkeys(WATCH.values()))
-    (UNITS / 'arche-defender-watch.service').write_text(f'''[Unit]
-Description=Arche Defender scan of a watched folder
+    drop_watches()
+    watches = []
+    for check, dirs in WATCH.items():
+        if check not in CHECKS: continue
+        u = 'arche-defender-watch-' + re.sub(r'\W+', '-', check.lower()).strip('-')
+        (UNITS / f'{u}.service').write_text(f'''[Unit]
+Description=Arche Defender: {check} after a change
 
 [Service]
 Type=oneshot
-ExecStartPre=/bin/sleep 5
-ExecStart="{sys.executable}" "{LAUNCHER}" --monitor {only}
-Nice=19
-IOSchedulingClass=idle
-''')
-    (UNITS / 'arche-defender-watch.path').write_text('''[Unit]
-Description=Arche Defender: scan new downloads and autostart entries
-
-[Path]
-''' + ''.join(f'PathChanged={d}\n' for d in WATCH) + '''Unit=arche-defender-watch.service
-
-[Install]
-WantedBy=default.target
-''')
+''' + ('' if check in URGENT else 'ExecStartPre=/bin/sleep 3\n') + f'''ExecStart="{sys.executable}" "{LAUNCHER}" --monitor --only "{check}"
+''' + ('' if check in URGENT else 'Nice=19\nIOSchedulingClass=idle\n'))
+        (UNITS / f'{u}.path').write_text('[Unit]\nDescription=Arche Defender: watch for ' + check + '\n\n[Path]\n' +
+                                         ''.join(f'PathChanged={d}\n' for d in dirs) + '\n[Install]\nWantedBy=default.target\n')
+        watches.append(f'{u}.path')
     sh('systemctl', '--user', 'daemon-reload')
-    out = sh('systemctl', '--user', 'enable', '--now', 'arche-defender.timer', 'arche-defender-watch.path', err=True).strip()
+    out = sh('systemctl', '--user', 'enable', '--now', 'arche-defender.timer', *watches, err=True).strip()
     on = sh('systemctl', '--user', 'is-active', 'arche-defender.timer').strip() == 'active'
-    return (f'Background monitor on: an hourly scan, and Downloads, Desktop, ~/.local/bin and autostart are watched. '
+    return (f'Background monitor on: an hourly scan, and {len(watches)} folder watches (Downloads, autostart, Documents...). '
             f'Turn off with: arche-defender uninstall-monitor' if on else f'Could not start the timer: {out or "is systemd --user running?"}')
 
 
@@ -113,9 +118,9 @@ StartupWMClass=Arche-defender
 
 @action('uninstall-monitor', 'stop the background monitor')
 def uninstall():
-    units = ('arche-defender.timer', 'arche-defender.service', 'arche-defender-watch.path', 'arche-defender-watch.service')
-    sh('systemctl', '--user', 'disable', '--now', *units)
-    for u in units: (UNITS / u).unlink(missing_ok=True)
+    drop_watches()
+    sh('systemctl', '--user', 'disable', '--now', 'arche-defender.timer')
+    for u in ('arche-defender.timer', 'arche-defender.service'): (UNITS / u).unlink(missing_ok=True)
     sh('systemctl', '--user', 'daemon-reload')
     return 'Background monitor removed.'
 
