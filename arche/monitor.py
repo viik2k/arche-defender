@@ -34,6 +34,12 @@ def run(only=None):
             try: msg = intel.update()
             except Exception as e: msg = f'Failed: {type(e).__name__}'
             if 'Failed' in msg: print(f'threat intel update: {msg}', file=sys.stderr)
+    if full:   # dependency advisories weekly, but only once you have run deps-update yourself: it sends package names to osv.dev
+        from . import deps
+        if deps.DB.exists():
+            try: msg = deps.update()
+            except Exception as e: msg = f'Could not update ({type(e).__name__})'
+            if msg.startswith('Could not'): print(f'deps update: {msg}', file=sys.stderr)
     names = pick(full, only)
     res = scan_all(load_baseline(), names)
     told = set(seen.get('told', []))

@@ -43,5 +43,20 @@ def test_hourly_run_refreshes_intel():
     assert calls == [1, 1], calls
 
 
+def test_weekly_run_refreshes_deps_once_opted_in():
+    import atexit, shutil, tempfile
+    from pathlib import Path
+    from arche import monitor, intel, cli, deps
+    d = Path(tempfile.mkdtemp()); atexit.register(shutil.rmtree, d, True)
+    calls, real = [], (intel.feed_age_days, deps.update, deps.DB, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have)
+    intel.feed_age_days, deps.update, deps.DB = lambda: 0, lambda: calls.append(1) or 'Checked 3 packages', d / 'deps.json'
+    cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have = lambda *a: [], lambda *a: {}, lambda *a: None, d / 'n.json', lambda c: False
+    try:
+        monitor.run(); assert calls == [], 'never ran deps-update: stays offline'
+        deps.DB.write_text('{}'); monitor.SEEN.unlink(); monitor.run(); assert calls == [1]
+        monitor.run(); assert calls == [1], 'hourly quick pass'
+    finally: intel.feed_age_days, deps.update, deps.DB, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have = real
+
+
 if __name__ == '__main__':
-    test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); print('ok')
+    test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); print('ok')

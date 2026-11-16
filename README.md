@@ -72,7 +72,7 @@ about yet. Folder watches (systemd `.path` units) also re-run just the matching 
 Downloads, Desktop and `~/.local/bin` (dropped files), autostart, user services, D-Bus services and launchers (persistence),
 and Documents and Pictures (the ransomware tripwire, which runs at normal priority so a busy disk cannot delay it). No
 daemon runs in between. The hourly pass also refreshes the threat-intel feeds once a day, the way antivirus updates its
-definitions (offline, it keeps the last ones).
+definitions (offline, it keeps the last ones). Once you have run `deps-update` yourself, the weekly full pass repeats it.
 
 ## Actions
 
