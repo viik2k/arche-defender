@@ -114,5 +114,13 @@ class Electron(unittest.TestCase):
         self.assertEqual([s for _, s, _ in updates.electron_rows(apps, {})], [INFO])   # no release feed yet
 
 
+    def test_unpackaged_rows(self):
+        now = time.time(); home = updates.HOME
+        rows = list(updates.unpackaged_rows([(f'{home}/Applications/Obsidian-1.9.12.AppImage', now - 86400),
+                                             ('/opt/Old-2.0.1.appimage', now - 400 * 86400)], ['/opt/tarball-app'], now))
+        self.assertEqual([(s, t.split(' ')[1]) for t, s, _ in rows], [(INFO, 'Obsidian-*.AppImage'), (WARN, 'Old-*.appimage'), (INFO, 'was')])
+        self.assertEqual(rows[0][2], '~/Applications/Obsidian-1.9.12.AppImage')
+
+
 if __name__ == '__main__':
     unittest.main()

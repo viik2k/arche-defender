@@ -1,10 +1,9 @@
 # Updates and vulnerabilities: OS support end, pending (security) package updates, reboot-needed kernels,
 # Flatpak and firmware updates, fwupd's Host Security ID, and CPU vulnerability mitigations;
-# apps that bundle a browser engine (Electron) too old to still get security fixes.
-# How long since the last update is hardening.py's 'Security posture'; this module covers what is still waiting.
-import configparser, json, mmap, os, re, time
+# apps that bundle a browser engine (Electron) too old to still get security fixes; AppImages and /opt apps no package updates.
+import configparser, itertools, json, mmap, os, re, time
 from datetime import date
-from .core import check, alert, warn, item, sh, have, text, files, jsonf, HOME, UPGRADE as UPGRADE_CMD
+from .core import check, alert, warn, item, ver, owned, sh, have, text, files, jsonf, HOME, UPGRADE as UPGRADE_CMD
 from .intel import ELECTRON
 
 UPGRADE = f'Update with your desktop\'s updater or: {UPGRADE_CMD}'
@@ -241,3 +240,29 @@ def electron_rows(apps, releases):
 def electron():
     """Apps that bundle their own Chromium (Electron: VS Code, Discord, Obsidian...) are only as patched as the Electron they ship."""
     yield from electron_rows(electron_apps(), jsonf(ELECTRON))
+
+
+APPIMAGE_DIRS = ('~/Applications', '~/AppImages', '~/.local/bin', '~/bin', '~/Downloads', '~/Desktop', '/opt', '/opt/*')
+STALE = 180 * 86400
+
+
+def unpackaged_rows(appimages, by_hand, now):
+    """appimages: (path, mtime); by_hand: /opt folders no package owns. An AppImage that updates itself replaces its file."""
+    for f, mtime in appimages:
+        name = ver(os.path.basename(f))   # Obsidian-1.9.12.AppImage -> Obsidian-*.AppImage, so an update is not a new row
+        if now - mtime > STALE:
+            yield warn(f'AppImage {name} has not changed in over six months: nothing updates AppImages for you, and the libraries inside are as old as the file',
+                       f'Get the current version from its maker, or install it from Flathub or your package manager so it updates with the system ({f.replace(HOME, "~")})')
+        else: yield item(f'AppImage {name} gets no system updates (only its own updater, if it has one)', f.replace(HOME, '~'))
+    for d in by_hand: yield item(f'{d} was installed by hand (no package): it is only updated if it updates itself')
+
+
+@check('Apps outside the package manager', 'Updates')
+def unpackaged():
+    """AppImages and hand-installed /opt apps: the system updater never touches them."""
+    imgs = [(f, os.path.getmtime(f)) for f in files(*(f'{d}/*.[Aa]pp[Ii]mage' for d in APPIMAGE_DIRS)) if os.path.isfile(f)]
+    opt = [d for d in files('/opt/*') if os.path.isdir(d) and not os.path.islink(d)]
+    # A package may own /opt/x/bin/app but neither /opt/x nor /opt/x/bin: ask about a few of the files inside.
+    kids = {d: list(itertools.islice((os.path.join(r, f) for r, _, fs in os.walk(d) for f in fs), 5)) for d in opt}
+    pkg = owned(opt + [k for v in kids.values() for k in v])
+    yield from unpackaged_rows(imgs, [d for d in opt if d not in pkg and not pkg & set(kids[d])], time.time())
