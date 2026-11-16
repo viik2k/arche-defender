@@ -515,7 +515,8 @@ def keys():
     found = {}
     for f in files(*MCP_FILES, '~/.claude/settings.json', '~/.claude/settings.local.json', '~/.codex/config.toml', '~/.aider.conf.yml',
                    '~/.continue/config.yaml', '~/.config/litellm/*.yaml', '~/.config/fabric/.env', '~/.config/aichat/config.yaml',
-                   '~/.config/io.datasette.llm/keys.json', '~/.claude/plugins/cache/*/*/*/.mcp.json', '~/.env',
+                   '~/.config/io.datasette.llm/keys.json', '~/.claude/plugins/cache/*/*/*/.mcp.json', '~/.env', '~/.gemini/.env',
+                   '~/.config/goose/config.yaml', '~/.config/goose/secrets.yaml',   # secrets.yaml: Goose's store when the keyring is off
                    *OPENCLAW, '~/.openclaw/.env', '~/.openclaw/agents/*/agent/auth-profiles.json'):
         if k := secret_kinds(text(f)): found[tilde(f)] = k
     for f, kinds in sorted(found.items()):
