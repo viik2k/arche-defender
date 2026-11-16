@@ -105,3 +105,22 @@ def paired():
     try: c.read_string(text(f'{HOME}/.config/kdeconnect/trusted_devices'))
     except configparser.Error: pass
     for dev in c.sections(): yield item(f'KDE Connect trusts {c[dev].get("name", dev)}', fix='Review in System Settings > KDE Connect; unpair phones you no longer use.')
+
+
+def wifi_row(ssid, km, proto, auto, uuid):
+    """One saved Wi-Fi network: open or WEP/WPA1 networks that join by themselves are easy to fake or sniff."""
+    weak = 'open (no encryption)' if not km else 'WEP' if km in ('none', 'ieee8021x') else 'WPA1' if km == 'wpa-psk' and proto == 'wpa' else None
+    if not weak: return None
+    fix = f'Anyone nearby can read the traffic or fake "{ssid}". Stop auto-joining it: nmcli connection modify uuid {uuid} connection.autoconnect no'
+    return warn(f'Saved Wi-Fi "{ssid}" is {weak} and joins automatically', fix=fix) if auto == 'yes' else item(f'Saved Wi-Fi "{ssid}" is {weak}')
+
+
+@check('Wi-Fi networks', 'Network')
+def wifi():
+    if not have('nmcli'): return
+    for l in sh('nmcli', '-t', '-f', 'UUID,TYPE', 'connection', 'show', timeout=10).splitlines():
+        uuid, _, kind = l.partition(':')
+        if kind != '802-11-wireless': continue
+        f = sh('nmcli', '-t', '-g', '802-11-wireless.ssid,802-11-wireless-security.key-mgmt,802-11-wireless-security.proto,connection.autoconnect',
+               'connection', 'show', 'uuid', uuid, timeout=10).split('\n')
+        if len(f) >= 4 and (r := wifi_row(*f[:4], uuid)): yield r

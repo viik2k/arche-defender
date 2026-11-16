@@ -46,9 +46,10 @@ against the baseline (-1 when new). Most come with a `fix:` line.
 | Protection | firewalld zones and open port ranges, update age, SELinux, Secure Boot, disk encryption, kernel sysctls, autologin and screen lock, passwordless sudo, sshd config, permissions on SSH keys and token files, passphrase-less keys, setuid/setgid programs and file capabilities |
 | Integrity | `rpm -V` on the tools attackers swap (ls, ps, ss, sudo, sshd…), processes and kernel modules hidden from `/proc`, processes posing as kernel threads, code loaded from temp folders, LD_PRELOAD injection, promiscuous network cards, kernel taint |
 | Persistence | XDG autostart, Plasma scripts, shell rc files, systemd timers and services, cron, udev rules, ld.so.preload, PAM, shadowed sudo/ssh, browser extensions and native messaging hosts, out-of-tree kernel modules |
-| Network | listening programs, hosts file, DNS, proxies, remote-desktop tools, SSH keys, shares, accounts |
+| Network | listening programs, hosts file, DNS, proxies, remote-desktop tools, SSH keys, shares, accounts; root certificates added to the system or to NSS/Firefox stores (a rogue one can read all HTTPS); saved open, WEP or WPA1 Wi-Fi that joins automatically |
 | Processes | programs running from temp or download folders, memfd, deleted binaries, executables no package owns |
 | Activity | the last week of the journal: wrong-password bursts, SSH brute force and logins after it, new accounts, new admins |
+| Browsers | Safe Browsing switched off (Chromium family and Firefox), saved passwords protected only by Chromium's built-in key, Firefox proxies, managed browser policies that force extensions, proxies, search engines or certificates (how adware persists) |
 | Privacy | what is using the camera, microphone or screen right now; Flatpak apps allowed outside their sandbox |
 | Devices | USB and Thunderbolt devices (a new "keyboard" can be a BadUSB), paired Bluetooth devices and KDE Connect phones |
 | Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations |

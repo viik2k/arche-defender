@@ -1,8 +1,9 @@
 # Threat intel: public IP, domain and hash feeds cached under STATE/intel, matched offline during scans.
 # The only network access in the tool is intel-update, which the user runs; scans never download anything.
-import ipaddress, json, os, re, shutil, sqlite3, tempfile, time, urllib.request
+import ipaddress, json, os, re, time, urllib.request
 from pathlib import Path
 from .core import check, action, alert, warn, item, sh, text, files, jsonf, write_private, STATE, HOME
+from .browsers import copy_query
 
 DIR = STATE / 'intel'
 CUSTOM = Path(os.environ.get('XDG_CONFIG_HOME') or f'{HOME}/.config') / 'arche-defender' / 'iocs.txt'   # your own indicators
@@ -136,18 +137,12 @@ BROWSERS = {   # name -> globs of Chromium History or Firefox places.sqlite file
 
 
 def history_hosts(db, days=30):
-    """Hostnames visited in the last `days`, read from a copy (the live file is locked while the browser runs)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        cp = Path(tmp) / 'h.sqlite'; shutil.copyfile(db, cp)
-        con = sqlite3.connect(f'file:{cp}?mode=ro', uri=True)
-        try:
-            if db.endswith('places.sqlite'):
-                q, since = 'SELECT url FROM moz_places WHERE last_visit_date > ?', (time.time() - days * 86400) * 1e6
-            else:   # Chromium stores microseconds since 1601
-                q, since = 'SELECT url FROM urls WHERE last_visit_time > ?', (time.time() - days * 86400 + 11644473600) * 1e6
-            return {re.sub(r'^[a-z]+://([^/:?#]+).*$', r'\1', u).lower() for (u,) in con.execute(q, (since,)) if '://' in u}
-        except sqlite3.Error: return set()
-        finally: con.close()
+    """Hostnames visited in the last `days`."""
+    if db.endswith('places.sqlite'):
+        q, since = 'SELECT url FROM moz_places WHERE last_visit_date > ?', (time.time() - days * 86400) * 1e6
+    else:   # Chromium stores microseconds since 1601
+        q, since = 'SELECT url FROM urls WHERE last_visit_time > ?', (time.time() - days * 86400 + 11644473600) * 1e6
+    return {re.sub(r'^[a-z]+://([^/:?#]+).*$', r'\1', u).lower() for (u,) in copy_query(db, q, (since,)) if '://' in u}
 
 
 @check('Browsing history', 'Threats', slow=True)

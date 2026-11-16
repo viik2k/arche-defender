@@ -33,6 +33,16 @@ class Flatpak(unittest.TestCase):
         self.assertEqual(list(privacy.flatpak_rows('a', 'not ini')), [])
 
 
+class Wifi(unittest.TestCase):
+    def test_rows(self):
+        self.assertEqual(privacy.wifi_row('Cafe', '', '', 'yes', 'u1')[1], WARN)
+        self.assertEqual(privacy.wifi_row('Cafe', '', '', 'no', 'u1'), ('Saved Wi-Fi "Cafe" is open (no encryption)', INFO, None))
+        self.assertIn('WEP', privacy.wifi_row('Old', 'none', '', 'yes', 'u2')[0])
+        self.assertIn('WPA1', privacy.wifi_row('Old', 'wpa-psk', 'wpa', 'yes', 'u3')[0])
+        for km, proto in (('wpa-psk', ''), ('wpa-psk', 'rsn'), ('sae', ''), ('owe', ''), ('wpa-eap', '')):
+            self.assertIsNone(privacy.wifi_row('Home', km, proto, 'yes', 'u4'), km)
+
+
 class Usb(unittest.TestCase):
     def setUp(self):
         self.d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, self.d, True)
