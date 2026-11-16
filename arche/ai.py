@@ -3,6 +3,7 @@
 # hidden instructions and malicious commands, flags settings that let an agent act without asking, finds plaintext API
 # keys (never printing them), local model servers open to the network, and pickle model files that run code when loaded.
 import io, json, os, pickletools, re, zipfile
+from struct import error as struct_error
 from pathlib import Path
 from .hardening import argv
 from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check
@@ -366,16 +367,72 @@ def model_imports(p):
     return set()
 
 
+GGUF_SIZE = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}   # value type -> bytes; 8 string, 9 array
+# Jinja server-side template injection: a chat template that walks into Python objects (CVE-2024-34359 and kin).
+SSTI = re.compile(r'__(class|globals|subclasses|builtins|import|mro|bases?|init|getattribute|code|reduce)__|\bpopen\b|'
+                  r'\bos\.system\b|\bsubprocess\b|\b(eval|exec|compile)\s*\(')
+
+
+def gguf_templates(p):
+    """The chat templates in a GGUF file's metadata: Jinja code llama.cpp, Ollama and LM Studio render."""
+    import struct
+    out = []
+    with open(p, 'rb') as f:
+        if f.read(4) != b'GGUF' or struct.unpack('<I', f.read(4))[0] < 2: return out   # v1 used 32-bit lengths
+        u64 = lambda: struct.unpack('<Q', f.read(8))[0]
+        def skip(t):
+            if t == 8: f.seek(u64(), 1)
+            elif t == 9:
+                et, n = struct.unpack('<IQ', f.read(12))
+                if et in GGUF_SIZE: f.seek(GGUF_SIZE[et] * n, 1)
+                else:
+                    for _ in range(n): skip(et)
+            else: f.seek(GGUF_SIZE[t], 1)
+        f.seek(8, 1)   # tensor count
+        for _ in range(min(u64(), 10000)):
+            k = f.read(u64()); t = struct.unpack('<I', f.read(4))[0]
+            if t == 8 and k.startswith(b'tokenizer.chat_template'): out.append(f.read(u64()).decode('utf-8', 'replace'))
+            else: skip(t)
+    return out
+
+
+def keras_lambda(p):
+    """True when a Keras model has a Lambda layer: Python code that runs when the model is loaded."""
+    if zipfile.is_zipfile(p):
+        with zipfile.ZipFile(p) as z: cfg = z.read('config.json') if 'config.json' in z.namelist() else b''
+    else:
+        with open(p, 'rb') as f: cfg = f.read(8 << 20)   # .h5 keeps model_config as a JSON attribute near the start
+    return bool(re.search(rb'"class_name":\s*"Lambda"', cfg))
+
+
+def model_risks(p):
+    """(severity, reason) for code hidden in a GGUF or Keras model file."""
+    if p.endswith(('.keras', '.h5')):
+        if keras_lambda(p): yield WARN, 'a Keras Lambda layer runs Python code when loaded'
+        return
+    for t in gguf_templates(p):
+        m = SSTI.search(t)
+        if m: yield ALERT, f'its chat template reaches into Python ({m[0]}): code runs when it is used for chat'
+        for r in scan_text(t, p):
+            if r[1] == ALERT: yield ALERT, f'its chat template: {r[0]}'
+
+
 @check('AI model files', FAM, slow=True)
 def models():
-    # Pickle-format models (.pt/.ckpt/.bin/.pkl) can run any code when loaded; safetensors and GGUF cannot.
+    # Pickle-format models (.pt/.ckpt/.bin/.pkl) can run any code when loaded, Keras Lambda layers too, and a GGUF chat
+    # template is Jinja code; safetensors are data only.
     n = 0
     for d, dirs, fs in os.walk(HOME):
         dirs[:] = [x for x in dirs if x not in PRUNE - {'.cache'} and not x.startswith(('.wine', 'compatdata'))]
         if d.count('/') - HOME.count('/') > 8: dirs[:] = []
         for f in fs:
-            if not f.endswith(('.pt', '.pth', '.ckpt', '.bin', '.pkl', '.pickle', '.joblib')): continue
             p = os.path.join(d, f)
+            if f.endswith(('.gguf', '.keras', '.h5')) or f.startswith('sha256-') and '/.ollama/' in p:   # Ollama blobs are GGUF
+                try: risks = list(model_risks(p))
+                except (OSError, zipfile.BadZipFile, KeyError, struct_error, ValueError, MemoryError): continue
+                for sev, why in dict.fromkeys(risks): yield (f'Model file {tilde(p)}: {why}', sev, f'Do not load it; quarantine {tilde(p)}')
+                continue
+            if not f.endswith(('.pt', '.pth', '.ckpt', '.bin', '.pkl', '.pickle', '.joblib')): continue
             try: imps = model_imports(p)
             except (OSError, zipfile.BadZipFile, ValueError): continue
             if imps: n += 1

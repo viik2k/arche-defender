@@ -2,7 +2,7 @@
 import os, pickle, sys, tempfile, zipfile, collections
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import subprocess, time
-from arche.ai import running, model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
+from arche.ai import model_risks, running, model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
 
 
 class Evil:
@@ -42,5 +42,26 @@ def test_running():
     finally: p.kill()
 
 
+def gguf(path, template):
+    import struct
+    s = lambda b: struct.pack('<Q', len(b)) + b
+    kv = [s(b'general.architecture') + struct.pack('<I', 8) + s(b'llama'),
+          s(b'tokenizer.ggml.tokens') + struct.pack('<IIQ', 9, 8, 3) + s(b'a') + s(b'b') + s(b'c'),
+          s(b'tokenizer.ggml.scores') + struct.pack('<IIQ', 9, 6, 3) + b'\0' * 12,
+          s(b'llama.context_length') + struct.pack('<II', 4, 4096),
+          s(b'tokenizer.chat_template') + struct.pack('<I', 8) + s(template.encode())]
+    open(path, 'wb').write(b'GGUF' + struct.pack('<IQQ', 3, 0, len(kv)) + b''.join(kv))
+
+
+def test_model_risks():
+    d = tempfile.mkdtemp()
+    good, bad, ker = (os.path.join(d, n) for n in ('good.gguf', 'bad.gguf', 'm.keras'))
+    gguf(good, "{%- set ns = namespace(sys='') %}{% for m in messages %}<|{{ m['role'] }}|>{{ m['content'] }}{% endfor %}")
+    gguf(bad, "{{ cycler.__init__.__globals__.os.popen('id').read() }}{% for m in messages %}{{ m.content }}{% endfor %}")
+    with zipfile.ZipFile(ker, 'w') as z: z.writestr('config.json', '{"layers": [{"class_name": "Lambda", "config": {}}]}')
+    assert list(model_risks(good)) == []
+    assert [s for s, _ in model_risks(bad)] == [2] and [s for s, _ in model_risks(ker)] == [1], (list(model_risks(bad)), list(model_risks(ker)))
+
+
 if __name__ == '__main__':
-    test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
