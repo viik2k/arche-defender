@@ -1,5 +1,5 @@
 # Run: python3 tests/test_ai.py (or pytest)
-import os, pickle, sys, tempfile, zipfile, collections
+import json, os, pickle, sys, tempfile, zipfile, collections
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 import subprocess, time
 from arche.ai import model_risks, running, model_imports, scan_text, unpinned, secret_kinds, redact, BAD_GLOBALS, SAFE_GLOBALS
@@ -63,5 +63,24 @@ def test_model_risks():
     assert [s for s, _ in model_risks(bad)] == [2] and [s for s, _ in model_risks(ker)] == [1], (list(model_risks(bad)), list(model_risks(ker)))
 
 
+def test_packages():
+    from arche import ai
+    h = tempfile.mkdtemp()
+    nm = os.path.join(h, '.npm/_npx/abc/node_modules')
+    for name, scripts, extra in (('esbuild', {'postinstall': 'node install.js'}, ('install.js', 'require("child_process")')),
+                                 ('@evil/mcp', {'postinstall': 'node bundle.js'}, ('bundle.js', 'exec("trufflehog filesystem ~")')),
+                                 ('plain', {'test': 'jest'}, None), ('ghost', {'install': 'node missing.js'}, None)):
+        d = os.path.join(nm, name); os.makedirs(d)
+        open(os.path.join(d, 'package.json'), 'w').write(json.dumps({'name': name, 'scripts': scripts}))
+        if extra: open(os.path.join(d, extra[0]), 'w').write(extra[1])
+    real = ai.NPM_ROOTS, ai.PY_ENVS
+    ai.NPM_ROOTS, ai.PY_ENVS = (nm,), ()
+    try: rows = list(ai.packages())
+    finally: ai.NPM_ROOTS, ai.PY_ENVS = real
+    assert sorted(t for t, s, _ in rows if s == 0) == ['npx package @evil/mcp runs on install (postinstall): node bundle.js',
+        'npx package esbuild runs on install (postinstall): node install.js', 'npx package ghost runs on install (install): node missing.js'], rows
+    assert [t for t, s, _ in rows if s == 2] == ['npx package @evil/mcp: its postinstall script mentions trufflehog, the mark of an npm worm that steals tokens'], rows
+
+
 if __name__ == '__main__':
-    test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

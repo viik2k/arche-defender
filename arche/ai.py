@@ -262,6 +262,45 @@ def mcp():
                    f'{", ".join(sorted(set(loose)))}', 'Pin a version (pkg@1.2.3) so a hijacked release cannot run on your PC')
 
 
+# Where npx/uvx keep the MCP servers they run, and where global AI CLIs (Claude Code, Codex, Gemini CLI) are installed.
+NPM_ROOTS = ('~/.npm/_npx/*/node_modules', '~/.npm-global/lib/node_modules', '~/.nvm/versions/node/*/lib/node_modules',
+             '~/.local/share/pnpm/global/*/node_modules', '~/.bun/install/global/node_modules', '/usr/lib/node_modules', '/usr/local/lib/node_modules')
+PY_ENVS = ('~/.cache/uv/archive-v0/*', '~/.local/share/uv/tools/*', '~/.local/share/pipx/venvs/*')
+# What npm worms left in install scripts: Shai-Hulud ran trufflehog for secrets, the Nx "s1ngularity" hack had AI CLIs hunt them.
+WORM = re.compile(r'trufflehog|shai-?hulud|--dangerously-skip-permissions|--dangerously-bypass-approvals|--yolo\b|--trust-all-tools', re.I)
+
+
+def install_scripts(nm):
+    """(package, hook, command, package dir) for each package in a node_modules folder that runs code when installed."""
+    # ponytail: top-level and @scope packages only (npm hoists nearly everything there); nested node_modules are not read
+    for pj in files(f'{nm}/*/package.json', f'{nm}/@*/*/package.json'):
+        meta = jsonf(pj)
+        scripts = meta.get('scripts') if isinstance(meta.get('scripts'), dict) else {}
+        for hook in ('preinstall', 'install', 'postinstall'):
+            if isinstance(scripts.get(hook), str): yield meta.get('name') or Path(pj).parent.name, hook, scripts[hook], os.path.dirname(pj)
+
+
+@check('Agent tool packages', FAM)
+def packages():
+    # The install scripts already ran, so this is a post-mortem: did a hijacked release of an MCP server or AI CLI run something?
+    for root in NPM_ROOTS:
+        for nm in files(root):
+            where = 'npx' if '/_npx/' in nm else 'npm global'
+            for name, hook, cmd, d in install_scripts(nm):
+                yield item(ver(f'{where} package {name} runs on install ({hook}): {redact(cmd)[:120]}'))
+                body = cmd + '\n'.join(text(os.path.join(d, f)) for f in re.findall(r'\bnode\s+([\w./-]+\.c?m?js)\b', cmd)
+                                       if os.path.isfile(os.path.join(d, f)) and os.path.getsize(os.path.join(d, f)) < 16 << 20)
+                if m := WORM.search(body):
+                    yield alert(f'{where} package {name}: its {hook} script mentions {m[0]}, the mark of an npm worm that steals tokens',
+                                'Rotate your npm, GitHub and cloud tokens, delete the package (and ~/.npm/_npx), and check GitHub for repos you did not make')
+                yield from scan_text(body, f'{where} package {name} ({hook})')
+    for f in files(*(f'{r}/lib/python3*/site-packages/*.pth' for r in PY_ENVS)):
+        code = [l for l in text(f).splitlines() if l.startswith(('import ', 'import\t'))]
+        if code:
+            yield item(ver(f'Runs whenever this uvx/pipx tool starts: {tilde(f)}'))
+            yield from scan_text('\n'.join(code), tilde(f))
+
+
 @check('AI keys in plain text', FAM)
 def keys():
     found = {}
