@@ -15,6 +15,18 @@ class Kernels(unittest.TestCase):
         self.assertEqual(updates.newest_same_flavor('6.1.0', []), '6.1.0')
 
 
+class Pending(unittest.TestCase):
+    def test_advisories_only_with_updateinfo(self):
+        out = {'check-upgrade': 'bash.x86_64  5.3-2.fc44  updates\n', 'advisory': 'FEDORA-2026-1 Critical/Sec. bash-5.3-2.fc44.x86_64\n'}
+        sh = mock.Mock(side_effect=lambda *a, **k: out[a[3]])
+        for cached, want in (([], ['1 package updates waiting']), (['/var/cache/libdnf5/f/repodata/x-updateinfo.xml.zst'],
+                             ['1 security updates waiting, 1 critical', '1 package updates waiting'])):
+            with mock.patch.object(updates, 'have', lambda c: c == 'dnf'), mock.patch.object(updates, 'sh', sh), \
+                 mock.patch.object(updates, 'files', lambda *g: cached if 'updateinfo' in g[0] else []):
+                self.assertEqual([t for t, _, _ in updates.pending()], want)
+        self.assertEqual([c.args[3] for c in sh.call_args_list], ['check-upgrade', 'check-upgrade', 'advisory'])
+
+
 class Hsi(unittest.TestCase):
     def test_levels(self):
         ok, bad = ['success'], []

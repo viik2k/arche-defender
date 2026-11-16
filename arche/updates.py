@@ -38,7 +38,9 @@ def pending():
     """Package updates waiting (from the package manager's cached metadata; no download) and a newer kernel than the running one."""
     if have('dnf'):
         ups = [l for l in sh('dnf', '-C', '-q', 'check-upgrade', timeout=120).splitlines() if re.match(r'^\S+\.\w+\s+\S+\s+\S+', l)]
-        sec = [l for l in sh('dnf', '-C', '-q', 'advisory', 'list', '--security', timeout=120).splitlines() if re.match(r'^\S+-\d', l)]
+        # dnf -C only knows advisories whose updateinfo is cached; repos without it (Nobara, most third-party) save a second
+        sec = [l for l in sh('dnf', '-C', '-q', 'advisory', 'list', '--security', timeout=120).splitlines() if re.match(r'^\S+-\d', l)] \
+            if files('/var/cache/libdnf5/*/repodata/*updateinfo*', '/var/cache/dnf/*/repodata/*updateinfo*') else []
     elif have('apt'):
         ups = [l for l in sh('apt', 'list', '--upgradable', timeout=120).splitlines() if '/' in l]
         sec = [l for l in ups if '-security' in l]
