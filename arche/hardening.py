@@ -128,7 +128,11 @@ def sshd():
 
 SECRET_FILES = ('~/.netrc', '~/.git-credentials', '~/.aws/credentials', '~/.config/gh/hosts.yml', '~/.docker/config.json',
                 '~/.kube/config', '~/.pgpass', '~/.npmrc', '~/.pypirc', '~/.config/rclone/rclone.conf', '~/.ssh/config',
-                '~/.claude.json', '~/.claude/.credentials.json', '~/.codex/auth.json', '~/.config/gcloud/credentials.db')
+                '~/.claude.json', '~/.claude/.credentials.json', '~/.codex/auth.json', '~/.config/gcloud/credentials.db',
+                # AI sign-ins: each is a live token for the account, and any process running as you can lift it
+                '~/.gemini/oauth_creds.json', '~/.gemini/mcp-oauth-tokens.json', '~/.config/github-copilot/apps.json',
+                '~/.config/github-copilot/hosts.json', '~/.mcp-auth/*/*_tokens.json', '~/.local/share/opencode/auth.json',
+                '~/.cache/huggingface/token', '~/.huggingface/token', '~/.ollama/id_ed25519', '~/.openclaw/agents/*/agent/auth-profiles.json')
 
 
 def unencrypted_key(p):
