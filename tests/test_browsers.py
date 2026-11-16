@@ -168,9 +168,7 @@ class Unpacked(unittest.TestCase):
                                                    'd' * 32: {'location': 8, 'path': '/usr/share', 'manifest': {'name': 'Bundled'}},
                                                    'e' * 32: {'location': 1, 'path': 'eeee/1.0'}}}}, f)
         rows = [(s, t) for t, s, _ in browsers.unpacked_rows('Chrome', prof)]
-        self.assertEqual(rows, [(WARN, f'Chrome: extension "PDF Helper" is loaded from a folder, not from the store: {ext}'),
-                                (INFO, f'Chrome: extension "Mine" is loaded from {own} (your own project)'),
-                                (INFO, 'Chrome: extension "Bundled" is loaded from /usr/share')])
+        self.assertEqual(rows, [(WARN, f'Chrome: extension "PDF Helper" is loaded from a folder, not from the store: {ext}')])
 
 
 class Hijack(unittest.TestCase):

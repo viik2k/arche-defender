@@ -51,8 +51,8 @@ def in_repo(p):
 
 
 def unpacked_rows(name, prof):
-    """Extensions loaded from a folder (developer mode, location 4, or --load-extension, location 8): they are not under
-    Extensions/, so the inventory and the malicious-ID feed never see them, and store review never did."""
+    """Extensions loaded from a folder (developer mode, location 4, or --load-extension, location 8) that store review never saw,
+    when the folder is yours to write and not one of your projects; 'Browser extensions' lists them all."""
     settings = {}   # Chrome can keep them in Secure Preferences, Brave and others in Preferences
     for f in ('Preferences', 'Secure Preferences'): settings.update((jsonf(f'{prof}/{f}').get('extensions') or {}).get('settings') or {})
     for eid, v in settings.items():
@@ -62,7 +62,6 @@ def unpacked_rows(name, prof):
             yield warn(f'{label(name, prof)}: extension "{title}" is loaded from a folder, not from the store: {path.replace(HOME, "~")}',
                        fix='No store review ever saw it, and malware installs extensions this way to read your pages. If you did not '
                            'load it yourself: remove it on the browser\'s extensions page, then delete the folder.')
-        else: yield item(f'{label(name, prof)}: extension "{title}" is loaded from {path.replace(HOME, "~")}' + (' (your own project)' if in_repo(path) else ''))
 
 
 @check('Browser protection', 'Browsers')
