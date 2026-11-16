@@ -72,7 +72,7 @@ It runs at the lowest CPU and disk priority and sends a desktop notification onl
 about yet. Folder watches (systemd `.path` units) also re-run just the matching check within seconds of a change:
 Downloads, Desktop and `~/.local/bin` (dropped files), autostart, user services, D-Bus services and launchers (persistence),
 Plasma widgets, KWin scripts and GNOME Shell extensions (desktop add-ons), the skill and plugin folders of Claude Code, Codex and Gemini CLI (scanned at once), the MCP config files of Cursor, Gemini CLI, Codex, VS Code, Claude Desktop, Windsurf and Goose (a newly added server; not `~/.claude.json`, which Claude Code rewrites on every prompt), shell history (a pasted ClickFix command), and Documents and Pictures (the ransomware tripwire and Encrypted files, which run at normal priority so a busy disk cannot delay it). No
-daemon runs in between. The hourly pass also refreshes the threat-intel feeds once a day, the way antivirus updates its
+daemon runs in between. The monitor guards itself: a command in its own units that install-monitor did not write, or a drop-in added to them, is an alert, a timer turned off or a monitor that has stopped running is a warning, and when an update brings new folder watches the scan tells you to re-run install-monitor. The hourly pass also refreshes the threat-intel feeds once a day, the way antivirus updates its
 definitions (offline, it keeps the last ones). Once you have run `deps-update` yourself, the weekly full pass repeats it.
 
 ## Actions

