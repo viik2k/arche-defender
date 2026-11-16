@@ -16,8 +16,8 @@ RISKY = {21: 'FTP', 23: 'Telnet', 139: 'Windows file sharing (SMB)', 445: 'Windo
 
 
 def listening(ss):
-    """(proto, port, program) for each socket bound beyond loopback, from `ss -tulnpH`."""
-    seen = set()
+    """(proto, port, program, reachable over IPv6) for each socket bound beyond loopback, from `ss -tulnpH`."""
+    seen = {}
     for l in ss.splitlines():
         f = l.split()
         if len(f) < 5 or not (m := re.match(r'^\[?(.*?)\]?(?:%(\S+))?:(\d+)$', f[4])): continue
@@ -32,7 +32,15 @@ def listening(ss):
         if not p:
             try: p = [None, f'{socket.getservbyport(port, f[0])} (system service)']
             except OSError: p = [None, 'a system service']
-        if (f[0], port) not in seen: seen.add((f[0], port)); yield f[0], port, p[1]
+        v6 = not ip or ip.version == 6 and (ip.is_unspecified or ip.is_global)   # [::] and * take IPv6; a ULA (fd..) never leaves the LAN
+        if (f[0], port) in seen: seen[f[0], port][3] |= v6
+        else: seen[f[0], port] = [f[0], port, p[1], v6]
+    return [tuple(v) for v in seen.values()]
+
+
+def public_v6(ip_out):
+    """Whether `ip -6 -o addr show scope global` lists an internet-routable address: then there is no NAT in front of this PC."""
+    return any(ipaddress.ip_address(a).is_global for a in re.findall(r'inet6 ([0-9a-f:]+)/', ip_out))
 
 
 def port_specs(specs):
@@ -67,14 +75,17 @@ def firewalld_open():
     return rules
 
 
-def exposed_rows(listeners, rules):
-    """rules None = nothing is filtered (no firewall, or a zone that accepts all)."""
-    for proto, port, prog in listeners:
+def exposed_rows(listeners, rules, v6_public=False):
+    """rules None = nothing is filtered (no firewall, or a zone that accepts all). v6_public: this PC has an internet IPv6 address."""
+    for proto, port, prog, v6 in listeners:
         if rules is not None and not any(p == proto and lo <= port <= hi for p, lo, hi in rules): continue
+        where = 'your network' + (', and from the internet over IPv6 unless your router blocks it' if v6 and v6_public else '')
         if port in RISKY:
-            yield warn(f'{RISKY[port]} ({prog}) on {proto} port {port} is reachable from your network',
+            yield warn(f'{RISKY[port]} ({prog}) on {proto} port {port} is reachable from {where}',
                        fix='Bind it to 127.0.0.1 in its settings, or close the port in the firewall, unless other machines must use it.')
-        else: yield item(f'Reachable from your network: {prog} on {proto} port {port}')
+        else: yield item(f'Reachable from {where}: {prog} on {proto} port {port}',
+                         fix='With IPv6 there is no NAT: check the router blocks unsolicited inbound IPv6 (most do by default), '
+                             'and close ports you do not use in the firewall.' if v6 and v6_public else None)
 
 
 def docker_rows(ps):
@@ -93,7 +104,7 @@ def exposed():
     if active('firewalld'): rules = firewalld_open()
     elif active('ufw') or active('nftables'): rules = []   # ponytail: their rules need root to read; assume default-deny
     else: rules = None
-    yield from exposed_rows(listening(sh('ss', '-tulnpH')), rules)
+    yield from exposed_rows(listening(sh('ss', '-tulnpH')), rules, public_v6(sh('ip', '-6', '-o', 'addr', 'show', 'scope', 'global')))
     if have('docker'): yield from docker_rows(sh('docker', 'ps', '--format', '{{.Names}}\t{{.Ports}}', timeout=10))
 
 

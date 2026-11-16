@@ -20,8 +20,8 @@ tcp LISTEN 0 4096 [::1]:631 [::]:*
 
 class Exposed(unittest.TestCase):
     def test_listening(self):
-        self.assertEqual(list(exposure.listening(SS)), [('udp', 5353, 'mdns (system service)'), ('udp', 1716, 'kdeconnectd'),
-                                                        ('tcp', 27036, 'steam'), ('tcp', 6379, 'redis-server')])
+        self.assertEqual(list(exposure.listening(SS)), [('udp', 5353, 'mdns (system service)', False), ('udp', 1716, 'kdeconnectd', True),
+                                                        ('tcp', 27036, 'steam', False), ('tcp', 6379, 'redis-server', True)])
 
     def test_firewall_filter(self):
         ls = list(exposure.listening(SS))
@@ -32,6 +32,13 @@ class Exposed(unittest.TestCase):
                           (WARN, 'Redis (redis-server) on tcp port 6379 is reachable from your network')])
         self.assertEqual(len(list(exposure.exposed_rows(ls, None))), 4)
         self.assertEqual(list(exposure.exposed_rows(ls, [])), [])
+        self.assertEqual([t for t, _, _ in exposure.exposed_rows(ls, rules, v6_public=True)][1:],
+                         ['Reachable from your network: steam on tcp port 27036',
+                          'Redis (redis-server) on tcp port 6379 is reachable from your network, and from the internet over IPv6 unless your router blocks it'])
+
+    def test_public_v6(self):
+        self.assertTrue(exposure.public_v6('2: eno1    inet6 2403:5820:ad20:0:1:2:3:4/64 scope global dynamic noprefixroute'))
+        self.assertFalse(exposure.public_v6('2: eno1    inet6 fd86:d14a:2512:1:1:2:3:4/64 scope global noprefixroute'))
 
     def test_service_ports(self):
         with tempfile.TemporaryDirectory() as etc, tempfile.TemporaryDirectory() as lib:
