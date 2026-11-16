@@ -157,7 +157,8 @@ def gui():
         fn, helptext, argname = ACTIONS[name]
         arg = None
         if argname:
-            arg = (filedialog.askopenfilename(title=helptext) if 'path' in argname.lower() else simpledialog.askstring(name, helptext))
+            arg = (filedialog.askopenfilename(title=helptext) if 'path' in argname.lower() else
+                   simpledialog.askstring(name, helptext, show='*' if argname == 'password' else None))
             if not arg: return
         status.config(text=f'Running {name} ...')
 

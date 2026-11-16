@@ -1,5 +1,5 @@
 # Command line: the GUI by default, headless scans for scripts and timers, and the registered actions.
-import argparse, json, sys, tempfile
+import argparse, getpass, json, sys, tempfile
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from . import core, __version__
@@ -85,6 +85,9 @@ def main(argv=None):
     args = p.parse_args(argv)
     if args.action:
         fn, _, argname = ACTIONS[args.action]
+        if argname == 'password':   # a password on the command line lands in shell history and in ps
+            if args.arg: print('Note: that password is now in your shell history; next time leave it off and you will be asked.', file=sys.stderr)
+            else: args.arg = getpass.getpass('Password (not shown): ')
         if argname and not args.arg: p.error(f'{args.action} needs {argname.upper()}')
         try: print(fn(args.arg) if argname else fn())
         except ValueError as e: p.error(str(e))
