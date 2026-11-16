@@ -70,5 +70,20 @@ def test_install_desktop_adds_scan_menu():
     assert os.path.isfile(f'{d}/applications/arche-defender.desktop')
 
 
+
+def test_install_monitor_watch_units():
+    import atexit, shutil, tempfile
+    from pathlib import Path
+    from arche import monitor, core
+    core.load_all()
+    d = Path(tempfile.mkdtemp()); atexit.register(shutil.rmtree, d, True)
+    real, monitor.UNITS, monitor.sh = (monitor.UNITS, monitor.sh), d, lambda *a, **k: ''   # never touches your real systemd
+    try: monitor.install()
+    finally: monitor.UNITS, monitor.sh = real
+    svc = (d / 'arche-defender-watch-ransomware-tripwire.service').read_text()
+    assert '--only "Ransomware tripwire" --only "Encrypted files"' in svc and 'Nice=' not in svc, svc
+    assert 'PathChanged=%h/Documents' in (d / 'arche-defender-watch-ransomware-tripwire.path').read_text()
+
+
 if __name__ == '__main__':
-    test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); test_install_desktop_adds_scan_menu(); print('ok')
+    test_install_monitor_watch_units(); test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); test_install_desktop_adds_scan_menu(); print('ok')

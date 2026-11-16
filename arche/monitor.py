@@ -14,6 +14,7 @@ WEEK = 7 * 86400
 WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'), 'Startup entries': ('%h/.config/autostart',),
          'Services': ('%h/.config/systemd/user',), 'Ransomware tripwire': ('%h/Documents', '%h/Pictures'),
          'Command hooks': ('%h/.local/share/dbus-1/services', '%h/.local/share/applications', '%h/.local/share/kio/servicemenus')}
+ALSO = {'Ransomware tripwire': ('Encrypted files',)}   # same trigger: encryption that misses the decoys still alarms
 URGENT = {'Ransomware tripwire'}   # runs at once and at normal priority: encryption saturates the disk, idle I/O would starve it
 
 
@@ -100,7 +101,7 @@ Description=Arche Defender: {check} after a change
 
 [Service]
 Type=oneshot
-''' + ('' if check in URGENT else 'ExecStartPre=/bin/sleep 3\n') + f'''ExecStart="{sys.executable}" "{LAUNCHER}" --monitor --only "{check}"
+''' + ('' if check in URGENT else 'ExecStartPre=/bin/sleep 3\n') + f'''ExecStart="{sys.executable}" "{LAUNCHER}" --monitor --only "{check}"''' + ''.join(f' --only "{x}"' for x in ALSO.get(check, ()) if x in CHECKS) + '''
 ''' + ('' if check in URGENT else 'Nice=19\nIOSchedulingClass=idle\n'))
         (UNITS / f'{u}.path').write_text('[Unit]\nDescription=Arche Defender: watch for ' + check + '\n\n[Path]\n' +
                                          ''.join(f'PathChanged={d}\n' for d in dirs) + '\n[Install]\nWantedBy=default.target\n')
