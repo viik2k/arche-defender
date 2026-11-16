@@ -1,7 +1,7 @@
 # Run: python3 tests/test_persistence.py (or pytest)
 import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.persistence import hooks, chromium_roots
+from arche.persistence import hooks, chromium_roots, install_cmds
 
 
 def test_hooks():
@@ -30,5 +30,13 @@ def test_custom_chromium_dirs():
     assert extra == [('brave-vault', '~/.config/brave-vault'), ('work', '~/.var/app/x.y/config/work')], extra   # not the Electron app
 
 
+
+def test_install_cmds():
+    t = ('install usb-storage /bin/true\ninstall cramfs /bin/false\ninstall dccp exit 1\n# install x /tmp/evil\n'
+         'install snd-pcm /sbin/modprobe --ignore-install snd-pcm && /sbin/modprobe snd-seq\n'
+         'install e1000e /tmp/.x/run.sh; /sbin/modprobe --ignore-install e1000e\nblacklist nouveau\n')
+    assert list(install_cmds(t)) == [('e1000e', '/tmp/.x/run.sh; /sbin/modprobe --ignore-install e1000e')], list(install_cmds(t))
+
+
 if __name__ == '__main__':
-    test_hooks(); test_custom_chromium_dirs(); print('ok')
+    test_hooks(); test_custom_chromium_dirs(); test_install_cmds(); print('ok')

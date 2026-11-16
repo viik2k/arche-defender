@@ -92,6 +92,30 @@ def hijack():
     for f in files('/etc/udev/rules.d/*.rules'):
         for l in lines(text(f)):
             if 'RUN' in l: yield item(f'{f}: {l}')
+    # Root runs these on its own: on every network change, at every boot (generators), whenever a module loads (modprobe install),
+    # for every program of a registered binary format (binfmt_misc), at every login message (motd). Package files are left out.
+    root = [f for f in files('/etc/NetworkManager/dispatcher.d/*', '/etc/NetworkManager/dispatcher.d/*/*', '/etc/update-motd.d/*',
+                             *(f'{d}/systemd/{k}-generators/*' for d in ('/etc', '/usr/local/lib') for k in ('system', 'user')))
+            if os.path.isfile(f)]
+    for f in sorted(set(root) - owned(root)): yield item(ver(f'Runs as root by itself: {f}'))
+    mods = files('/etc/modprobe.d/*.conf', '/usr/lib/modprobe.d/*.conf', '/usr/local/lib/modprobe.d/*.conf')
+    for f in sorted(set(mods) - owned(mods)):
+        for mod, cmd in install_cmds(text(f)):
+            yield alert(f'{f} runs a command as root whenever the {mod} module loads: {cmd[:150]}', f'Inspect it, then remove that install line from {f}')
+    fmt = {f: m[1] for f in files('/proc/sys/fs/binfmt_misc/*') if (m := re.search(r'^interpreter (\S+)', text(f), re.M))}
+    pkg = owned(set(fmt.values()))
+    for f, interp in sorted(fmt.items()):
+        if interp in pkg: continue
+        yield (alert if interp.startswith(('/tmp/', '/var/tmp/', '/dev/shm/', '/home/')) else item)(
+            f'Every program of the {os.path.basename(f)} binary format runs through {interp}', 'Inspect it, then: echo -1 | sudo tee ' + f)
+
+
+def install_cmds(t):
+    """(module, command) for modprobe `install` lines that do more than block the module or load it the normal way."""
+    for mod, cmd in re.findall(r'^\s*install\s+(\S+)\s+(.+)$', t, re.M):
+        if not re.fullmatch(r'(/usr)?(/s?bin/)?(true|false|exit\s+\d+)', cmd.strip()) and not \
+                re.fullmatch(r'(/usr)?/s?bin/modprobe\s+(-\S+\s+)*\S+(\s*(&&|;)\s*(/usr)?/s?bin/modprobe\s+(-\S+\s+)*\S+)*', cmd.strip()):
+            yield mod, cmd.strip()
 
 
 def field(f, k): return next(iter(re.findall(rf'^{k}=(.*)$', text(f), re.M)), '').strip()
