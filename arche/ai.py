@@ -23,10 +23,12 @@ AI_RULES = [(n, s, re.compile(p, re.I), h) for n, s, p, h in (
     ('bidirectional text override characters', WARN, r'[\u202A-\u202E\u2066-\u2069]', None),
     ('tells the agent to keep things from you', WARN,
      Q + r"\b((do not|don't|never)\s+(tell|inform|notify|alert|let)\s+the user\s+(know|about|that|what|you)\b|"
-     r"without (telling|notifying|informing|alerting) the user|without the user(\'s)? (knowing|knowledge|noticing)|"
+     r"(do not|don't|never)\s+mention\b[^\n]{0,120}\bthe user|without (telling|notifying|informing|alerting) the user|without the user(\'s)? (knowing|knowledge|noticing)|"
      r"(hide|conceal|keep) (this|it|these|that) (secret |hidden )?from the user)", ('the user',)),
     ('prompt-injection phrasing', WARN, Q + r'\b(ignore (all |any )?(the )?(previous|prior|above|earlier) (instructions|prompts|rules)|'
                                         r'disregard (your|the|all) (instructions|guidelines|system prompt))', ('ignore', 'disregard')),
+    ('reads SSH private keys', WARN, r'\b(cat|cp|scp|base64|curl|read\w*|load\w*|send\w*|upload\w*|include|attach|pass)\b[^\n]{0,60}'
+                                     r'\.ssh/id_(rsa|ed25519|ecdsa|dsa)\b(?!\.pub)', ('.ssh/id_',)),
     # Mentioning the file is fine (a note, an existence check); reading, copying or sending it is not.
     ('reads AI login credentials', ALERT, r'(?:\b(?:cat|less|more|head|tail|strings|cp|scp|rsync|tar|zip|base64|xxd|curl|wget|nc|jq|open|'
      r'read\w*|load\w*|upload\w*|send\w*|exfil\w*|steal|grab|copy|print|dump|find|search|collect|harvest)\b[^\n]{0,60})'
@@ -95,14 +97,14 @@ def scan_text(t, where):
         yield (alert if s == ALERT else warn)(f'{where}: {n}: "{snip.strip()}"', 'Read it before your agent runs it again; remove the plugin/skill if you did not expect this')
 
 
-def scan_tree(root, label):
+def scan_tree(root, label, limit=1 << 20):
     for d, dirs, fs in os.walk(root):
         dirs[:] = [x for x in dirs if x not in ('node_modules', '.git') and not x.startswith(('temp_git_', '.staging', '.replaced-'))]
         for f in fs:
             p = os.path.join(d, f)
             if os.path.splitext(f)[1].lower() not in SCAN_EXT or os.path.islink(p): continue
             try:
-                if os.path.getsize(p) > 1 << 20: continue
+                if os.path.getsize(p) > limit: continue
             except OSError: continue
             yield from scan_text(text(p), f'{label} {tilde(p)}')
 
@@ -314,6 +316,9 @@ def packages():
     for root in NPM_ROOTS:
         for nm in files(root):
             where = 'npx' if '/_npx/' in nm else 'npm global'
+            if where == 'npx':   # the MCP server itself (not its dependencies): tool descriptions are where tool poisoning hides
+                for dep in jsonf(os.path.join(os.path.dirname(nm), 'package.json')).get('dependencies') or {}:
+                    if os.path.isdir(os.path.join(nm, dep)): yield from scan_tree(os.path.join(nm, dep), f'MCP server package {dep}', 8 << 20)
             for name, hook, cmd, d in install_scripts(nm):
                 yield item(ver(f'{where} package {name} runs on install ({hook}): {redact(cmd)[:120]}'))
                 body = cmd + '\n'.join(text(os.path.join(d, f)) for f in re.findall(r'\bnode\s+([\w./-]+\.c?m?js)\b', cmd)
