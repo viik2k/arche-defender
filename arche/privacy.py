@@ -294,10 +294,10 @@ def crashes():
 
 SENSITIVE_EXT = {'.txt', '.csv', '.md', '.json', '.rtf', '.text', '.note', '.pem', '.key', ''}
 CARD = re.compile(r'(?<![\d.-])(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))(?:[ -]?\d{4}){2}[ -]?\d{1,7}(?![\d.-])')
-CARD_WORDS = re.compile(r'\b(card|visa|mastercard|amex|cvv|cvc|expir)', re.I)
+CARD_WORDS = re.compile(r'\b(card|visa|mastercard|amex|cvv|cvc|expir)')   # on lowercased text: re.I made this scan 0.6 s
 NOT_BIP39 = {'the', 'and', 'for', 'that', 'this', 'with', 'you', 'are', 'was', 'not', 'but', 'have', 'from', 'they', 'will', 'there',
              'their', 'what', 'when', 'which', 'your', 'can', 'has', 'had', 'were', 'been', 'its', 'our', 'him', 'her', 'his', 'she'}
-WALLET_WORDS = re.compile(r'seed|recovery|mnemonic|phrase|wallet|metamask|ledger|trezor|exodus|phantom|bip39', re.I)
+WALLET_WORDS = re.compile(r'seed|recovery|mnemonic|phrase|wallet|metamask|ledger|trezor|exodus|phantom|bip39')
 
 
 def luhn(d):
@@ -307,15 +307,16 @@ def luhn(d):
 
 def sensitive(name, t):
     """Kinds of sensitive data in one plain-text file (nothing of the data itself)."""
-    kinds, head = [], t[:2000].lower()
+    kinds, low = [], t.lower()
+    head = low[:2000]
     cols = set(re.findall(r'[a-z_]+', head.split('\n', 1)[0]))   # a CSV export's header line
     if {'url', 'password'} <= cols and cols & {'username', 'login', 'login_username'} or \
        ('"encrypted": false' in head and '"login"' in t[:200000]):
         kinds.append('a password-manager export')
     if '-----BEGIN' in t and re.search(r'-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----', t):
         kinds.append('a private key' + (' (passphrase-protected)' if key_locked(t) else ''))
-    if CARD_WORDS.search(t) and any(luhn(re.sub(r'\D', '', m)) for m in CARD.findall(t)): kinds.append('card numbers')
-    if (WALLET_WORDS.search(name) or WALLET_WORDS.search(t[:20000])) and recovery_phrase(t): kinds.append('a wallet recovery phrase')
+    if any(w in low for w in ('card', 'visa', 'amex', 'cvv', 'cvc', 'expir')) and CARD_WORDS.search(low) and any(luhn(re.sub(r'\D', '', m)) for m in CARD.findall(t)): kinds.append('card numbers')
+    if (WALLET_WORDS.search(name.lower()) or WALLET_WORDS.search(low[:20000])) and recovery_phrase(t): kinds.append('a wallet recovery phrase')
     return kinds
 
 
