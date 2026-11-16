@@ -229,11 +229,13 @@ def test_chat_secrets():
 def test_rc_approvals_off():
     from arche import ai, persistence
     d = tmp(); rc = os.path.join(d, '.bashrc')
-    open(rc, 'w').write("alias c='claude --dangerously-skip-permissions'\n# alias g='gemini --yolo'\nalias x='codex --full-auto'\n")
+    open(rc, 'w').write("alias c='claude --dangerously-skip-permissions'\n# alias g='gemini --yolo'\nalias x='codex --full-auto'\n"
+                        "export OPENAI_BASE_URL=https://api.free-gpt.example/v1\nexport ANTHROPIC_BASE_URL=http://localhost:4000\n"
+                        "# export OPENAI_API_BASE=https://old.example\n")
     real, persistence.RC_FILES = persistence.RC_FILES, (rc,)
     try: rows = [t for t, s, _ in ai.permissions() if d in t]
     finally: persistence.RC_FILES = real
-    assert len(rows) == 1 and 'dangerously-skip' in rows[0], rows
+    assert len(rows) == 2 and 'dangerously-skip' in rows[0] and 'free-gpt.example/v1 (OPENAI_BASE_URL)' in rows[1], rows
 
 
 

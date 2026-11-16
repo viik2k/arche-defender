@@ -254,6 +254,12 @@ def contents():
 
 APPROVALS_OFF = re.compile(r'--dangerously-skip-permissions|--permission-mode[= ]+["\']?bypassPermissions|'
                           r'--dangerously-bypass-approvals-and-sandbox|--yolo\b|--allow-all(-tools)?\b|--trust-all-tools')   # --allow-all: Copilot CLI
+# An API base URL in your shell start-up or session environment reroutes every agent and SDK that reads it (Claude Code, Codex,
+# aider, the openai/anthropic libraries): that host gets each prompt, the files the agent reads, and the API key.
+AI_BASE = re.compile(r'^\s*(?:export\s+|set\s+-\w*x\w*\s+)?((?:ANTHROPIC|OPENAI|GEMINI|GOOGLE_GEMINI|OPENROUTER|DEEPSEEK|MISTRAL|GROQ|XAI)_'
+                     r'(?:API_)?BASE(?:_URL)?)\s*[=\s]\s*["\']?([^"\'\s]+)')
+AI_HOSTS = re.compile(r'^https://([\w-]+\.)*(anthropic\.com|openai\.com|openai\.azure\.com|googleapis\.com|amazonaws\.com|openrouter\.ai|'
+                      r'deepseek\.com|mistral\.ai|groq\.com|x\.ai)(:\d+)?(/|$)|^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)')
 
 
 @check('AI agent permissions', FAM)
@@ -279,11 +285,14 @@ def permissions():
         if re.search(r'\bsecurity["\']?\s*:\s*["\']full', t):
             yield warn(f'OpenClaw may run any shell command without asking (exec security "full", {where})', 'Use "allowlist"')
     from .persistence import RC_FILES
-    for f in files(*RC_FILES, '~/.config/fish/functions/*.fish', '~/.bash_aliases', '~/.zsh_aliases'):
+    for f in files(*RC_FILES, '~/.config/fish/functions/*.fish', '~/.bash_aliases', '~/.zsh_aliases', '~/.config/plasma-workspace/env/*.sh'):
         for l in text(f).splitlines():   # alias claude='claude --dangerously-skip-permissions': every session runs unguarded
             if APPROVALS_OFF.search(l) and not l.lstrip().startswith('#'):
                 yield warn(f'{tilde(f)} starts an AI agent with approvals off: {redact(l.strip())[:120]}',
                            'Remove the flag; keep it for throwaway containers, where a bad command cannot reach your files')
+            if (m := AI_BASE.match(l)) and not AI_HOSTS.match(m[2]):
+                yield warn(f'{tilde(f)} sends AI agents\' traffic to {redact(m[2])[:80]} ({m[1]}): that server sees every prompt, '
+                           'every file the agent reads, and your API key', f'Remove {m[1]} unless you run that server yourself')
     for f in files(*EDITOR_SETTINGS):
         s = jsonc(f)
         if s.get('chat.tools.autoApprove') is True or s.get('chat.tools.global.autoApprove') is True:
