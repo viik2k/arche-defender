@@ -66,7 +66,7 @@ def test_install_desktop_adds_scan_menu():
     try: monitor.desktop()
     finally: os.environ.pop('XDG_DATA_HOME') if old is None else os.environ.__setitem__('XDG_DATA_HOME', old)
     m = f'{d}/kio/servicemenus/arche-defender-scan.desktop'
-    assert os.stat(m).st_mode & stat.S_IXUSR and '--window scan %f' in open(m).read()
+    assert os.stat(m).st_mode & stat.S_IXUSR and all(x in open(m).read() for x in ('--window scan %f', '--window vet %f', 'Actions=scan;vet'))
     assert os.path.isfile(f'{d}/applications/arche-defender.desktop')
 
 

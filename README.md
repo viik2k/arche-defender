@@ -25,7 +25,7 @@ plain Linux.
 
 Nothing to install: run it from the checkout. To get an `arche-defender` command instead, `pipx install .` from the
 checkout (tkinter comes from your distro: `python3-tkinter` on Fedora, `python3-tk` on Debian/Ubuntu, `tk` on Arch).
-Add it to the app menu, and a **Scan with Arche Defender** entry to Dolphin's right-click menu, with `./arche-defender.py install-desktop`.
+Add it to the app menu, and **Scan with Arche Defender** and **Check AI skill or plugin before installing** entries to Dolphin's right-click menu, with `./arche-defender.py install-desktop`.
 
 On the first run nothing is marked new because there is no baseline. Read through the findings, then click
 **Accept as baseline** (or `--scan --accept`). Later scans mark anything that appeared since in amber.
@@ -88,7 +88,8 @@ Also in the window's **Tools** menu.
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
-| `install-desktop` | adds it to the app menu, and **Scan with Arche Defender** to Dolphin's right-click menu (any action takes `--window` to show its result in a window) |
+| `vet PATH` | checks a skill, plugin, MCP server or extension before you install it (a folder, or a .zip, .skill, .mcpb, .vsix, .xpi or .crx): the AI and malware rules over every file, bundled dependencies included; the hooks, MCP servers and install scripts it would run on its own; wide `allowed-tools`; compiled programs it ships; password-protected archives refused. Prints a verdict and the code fingerprint the plugin will show once installed |
+| `install-desktop` | adds it to the app menu, and **Scan with Arche Defender** and **Check AI skill or plugin before installing** to Dolphin's right-click menu (any action takes `--window` to show its result in a window) |
 | `ignore "Check: text"` / `unignore "Check: text"` / `ignored` | hide one finding for good (in the window: right-click it), show it again, list them |
 | `history` | the score of the last 20 complete scans |
 

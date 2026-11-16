@@ -6,7 +6,7 @@ import hashlib, io, json, os, pickletools, re, zipfile
 from struct import error as struct_error
 from pathlib import Path
 from .hardening import argv
-from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check
+from .core import HOME, ALERT, WARN, alert, warn, item, ver, sh, text, files, jsonf, check, action
 
 try: from .malware import match as _match
 except ImportError: _match = None
@@ -837,3 +837,77 @@ def models():
             if bad: yield alert(f'Model file runs code when loaded: {tilde(p)} imports {", ".join(bad)}', f'Do not load it; quarantine {tilde(p)}')
             elif odd: yield item(f'Model file imports unusual code: {tilde(p)}: {", ".join(odd[:5])}')
     if n: yield item('Pickle-format model files were checked for code that runs on load')
+
+
+MAGIC = {b'\x7fELF': 'Linux program', b'MZ': 'Windows program', b'\xcf\xfa\xed\xfe': 'macOS program', b'\xca\xfe\xba\xbe': 'macOS program'}
+
+
+def vet_rows(root):
+    """Findings for an unpacked skill, plugin, MCP server or extension: rule hits in its text, the commands it runs on its own
+    (hooks, MCP servers, install scripts), wide allowed-tools, and compiled programs nothing here can read."""
+    from . import malware
+    n, bins = 0, []
+    for d, dirs, fs in os.walk(root) if os.path.isdir(root) else [(os.path.dirname(root), [], [os.path.basename(root)])]:
+        dirs[:] = [x for x in dirs if x != '.git']   # node_modules stays: a bundled dependency is where a payload hides
+        for f in fs:
+            p, n = os.path.join(d, f), n + 1
+            if n > 50000 or os.path.islink(p): continue
+            try: st = os.lstat(p); head = open(p, 'rb').read(4)
+            except OSError: continue
+            if k := next((v for m, v in MAGIC.items() if head.startswith(m)), None): bins.append(p)
+            if not k and os.path.splitext(f)[1].lower() in SCAN_EXT and st.st_size < 2 << 20: yield from scan_text(text(p), p)
+            else: yield from malware.inspect(p, st, False, risky=True)   # hashes, lures, documents, nested zips
+            if f == 'SKILL.md' or f.endswith('.md') and re.search(r'/(commands|agents)/', p): yield from preapproval_warns([p])
+            if not f.endswith('.json'): continue
+            j = jsonc(p)
+            if not isinstance(j, dict): continue
+            for ev, hs in (j.get('hooks') if isinstance(j.get('hooks'), dict) else {}).items():
+                for c in re.findall(r'"command":\s*"((?:[^"\\]|\\.)*)"', json.dumps(hs)):
+                    yield item(f'{p}: runs on every {ev}, without asking: {redact(json.loads(chr(34) + c + chr(34)))[:160]}')
+            mcp = j.get('mcpServers') or ({'server': j['server']['mcp_config']} if isinstance(j.get('server'), dict) and j['server'].get('mcp_config') else {})
+            for name, s in (mcp if isinstance(mcp, dict) else {}).items():
+                if not isinstance(s, dict): continue
+                yield item(f'{p}: starts MCP server {name}: {redact(" ".join(map(str, [s.get("command") or s.get("url") or s.get("httpUrl") or s.get("serverUrl", ""), *s.get("args", [])])))[:160]}')
+                if unpinned(s): yield warn(f'{p}: MCP server {name} runs whatever version is newest at each start', 'Pin a version (pkg@1.2.3), or the author can change the code later')
+            own = not re.search(r'/(node_modules|site-packages|\.?venv)/', p)   # a bundled dependency's install scripts already ran, on the author's PC
+            scripts = j.get('scripts') if own and f == 'package.json' and isinstance(j.get('scripts'), dict) else {}
+            for hook in ('preinstall', 'install', 'postinstall', 'prepare'):
+                if cmd := scripts.get(hook):
+                    yield (alert if WORM.search(str(cmd)) else warn)(f'{p}: runs on npm install ({hook}): {redact(cmd)[:160]}', 'Read what it runs before installing')
+    if bins: yield warn(f'Ships {len(bins)} compiled program(s) this check cannot read: {", ".join(bins[:3])}' + (f' and {len(bins) - 3} more' if len(bins) > 3 else ''),
+                        'Skills rarely need one. If a plugin does, get it from the project\'s own releases, or check it with ClamAV and VirusTotal')
+    yield from malware.engine_hits([root], malware.clam([root]))
+
+
+@action('vet', 'Check a skill, plugin, MCP server or extension before you install it: a folder, or a .zip, .skill, .mcpb, .vsix, .xpi or .crx',
+        arg='path')
+def vet(path):
+    import shutil, tempfile
+    src = os.path.abspath(os.path.expanduser(str(path).strip()))
+    if not os.path.exists(src): return f'Not found: {src}'
+    root, tmp = src, None
+    if os.path.isfile(src) and zipfile.is_zipfile(src):   # a .crx's header in front of the zip is fine
+        try:
+            with zipfile.ZipFile(src) as z:
+                infos = z.infolist()
+                if any(i.flag_bits & 1 for i in infos):
+                    return f'{src} is password-protected, so nothing can check what is inside. That is how ClawHub stealers got past scanners: do not install it.'
+                if len(infos) > 50000 or sum(i.file_size for i in infos) > 1 << 30:
+                    return f'{src} unpacks to over 1 GB or 50,000 files, which is not a skill or plugin (a zip bomb?). Not checked.'
+                tmp = root = tempfile.mkdtemp(prefix='arche-vet-')
+                z.extractall(tmp)   # zipfile drops absolute and ../ paths and writes links as plain files
+            while len(ls := os.listdir(root)) == 1 and os.path.isdir(os.path.join(root, ls[0])): root = os.path.join(root, ls[0])   # skill-name/SKILL.md
+        except (zipfile.BadZipFile, OSError, ValueError) as e:
+            if tmp: shutil.rmtree(tmp, True)
+            return f'Could not unpack {src}: {e}'
+    try: rows, fp = list(vet_rows(root)), fingerprint(root)
+    finally:
+        if tmp: shutil.rmtree(tmp, True)
+    name = (lambda s: s.replace(root + '/', '').replace(root, os.path.basename(src))) if tmp or os.path.isdir(src) else str
+    rows = sorted({(name(t), s, f) for t, s, f in rows}, key=lambda r: (-r[1], r[0]))
+    worst = max((s for _, s, _ in rows), default=0)
+    tag = {ALERT: 'ALERT', WARN: 'WARN'}
+    return '\n'.join([f'{src} (code {fp})', *(f'  [{tag.get(s, "info")}] {t}' + (f'\n      {f}' if f and s else '') for t, s, f in rows), '',
+                      ('Verdict: do not install it.' if worst == ALERT else 'Verdict: read the warnings before you install it.' if worst == WARN else
+                       'Verdict: nothing known-bad found. That is not proof it is safe: read its SKILL.md, hooks and scripts yourself.') +
+                      f' Once installed, its fingerprint shows as "code {fp}" in AI plugins, skills and hooks if it is the same code.'])

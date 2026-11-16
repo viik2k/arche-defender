@@ -132,13 +132,18 @@ StartupWMClass=Arche-defender
     m.write_text(f'''[Desktop Entry]
 Type=Service
 MimeType=all/allfiles;inode/directory;
-Actions=scan
+Actions=scan;vet
 X-KDE-Priority=TopLevel
 
 [Desktop Action scan]
 Name=Scan with Arche Defender
 Icon=security-high
 Exec="{sys.executable}" "{LAUNCHER}" --window scan %f
+
+[Desktop Action vet]
+Name=Check AI skill or plugin before installing
+Icon=security-medium
+Exec="{sys.executable}" "{LAUNCHER}" --window vet %f
 ''')
     m.chmod(0o755)
     return f'Added to the app menu ({p}) and to the file manager\'s right-click menu ({m}); delete those files to remove them'
