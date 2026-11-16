@@ -82,6 +82,7 @@ Also in the window's **Tools** menu.
 | Action | Does |
 |---|---|
 | `intel-update` | downloads the threat-intel feeds; scans themselves never use the internet (the full-scan UPnP check only talks to your router) |
+| `url-check URL` | checks a link before you open it, offline: threat-intel feeds plus phishing tricks (a familiar name used as a disguise, `user@` decoration, look-alike letters from other alphabets, `javascript:`/`data:` links, shorteners) |
 | `deps-update` | checks the lockfiles of the code projects in your home folder, and installed developer and AI tools, against the OSV database (osv.dev: GitHub, PyPI, RustSec and OpenSSF malicious-package advisories); only packages from the public registries are sent, never private package names |
 | `password-check` | tells you whether a password is in known data breaches (Have I Been Pwned range API: only the first 5 characters of its SHA-1 are sent) |
 | `scan PATH` | scans a file or folder now, as closely as a download (threat-intel hashes, the built-in rules, archives and documents, ClamAV and YARA when installed) and prints what it found |
@@ -96,7 +97,7 @@ Also in the window's **Tools** menu.
 ### Threat-intel feeds
 
 `intel-update` fetches keyless feeds: Feodo Tracker, SSLBL, Emerging Threats compromised IPs, Spamhaus DROP (v4 and v6),
-signature-base C2 and hash IOCs, HaGeZi's threat-intel domains, and the Malicious Extension Sentry list of Chrome extension IDs removed for malware. Matching happens offline against connections, file
+signature-base C2 and hash IOCs, HaGeZi's threat-intel domains, OpenPhish's live phishing pages, and the Malicious Extension Sentry list of Chrome extension IDs removed for malware. Matching happens offline against connections, file
 hashes and browsing history. It also fetches Electron's release list, to know which bundled browser engines are still patched. To also get **URLhaus** (malicious URLs, matched by exact URL), **MalwareBazaar** (sample
 hashes from the last 48 hours) and **ThreatFox** (C2 IPs, domains, URLs and hashes), get a free Auth-Key at
 <https://auth.abuse.ch/> and save it in `~/.config/arche-defender/abusech.key` (`chmod 600`) or `$ABUSECH_AUTH_KEY`.

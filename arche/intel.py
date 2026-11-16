@@ -1,6 +1,6 @@
 # Threat intel: public IP, domain and hash feeds cached under STATE/intel, matched offline during scans.
 # Network access here happens only in actions the user runs (intel-update, password-check); scans never download anything.
-import csv, hashlib, io, ipaddress, json, os, re, time, urllib.request, zipfile
+import csv, hashlib, io, ipaddress, json, os, re, time, unicodedata, urllib.parse, urllib.request, zipfile
 from pathlib import Path
 from .core import check, action, alert, warn, item, sh, text, files, jsonf, write_private, STATE, HOME
 from .browsers import copy_query
@@ -9,7 +9,7 @@ from .persistence import chromium_extensions
 DIR = STATE / 'intel'
 CUSTOM = Path(os.environ.get('XDG_CONFIG_HOME') or f'{HOME}/.config') / 'arche-defender' / 'iocs.txt'   # your own indicators
 STALE_DAYS = 7
-# name -> (url, kind). kind: ip, net (Spamhaus JSON lines), hash ('hash;comment'), domain, mixed (one IP or domain per line)
+# name -> (url, kind). kind: ip, net (Spamhaus JSON lines), hash ('hash;comment'), domain, mixed (one IP or domain per line), url
 FEEDS = {
     'Feodo Tracker': ('https://feodotracker.abuse.ch/downloads/ipblocklist.txt', 'ip'),
     'SSLBL': ('https://sslbl.abuse.ch/blacklist/sslipblacklist.txt', 'ip'),
@@ -20,6 +20,7 @@ FEEDS = {
     'signature-base hashes': ('https://raw.githubusercontent.com/Neo23x0/signature-base/master/iocs/hash-iocs.txt', 'hash'),
     'HaGeZi TIF': ('https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt', 'domain'),
     'Electron releases': ('https://releases.electronjs.org/releases.json', 'electron'),   # not indicators: updates.py reads it
+    'OpenPhish': ('https://raw.githubusercontent.com/openphish/public_feed/refs/heads/main/feed.txt', 'url'),   # live phishing pages
     'Malicious extensions': ('https://raw.githubusercontent.com/toborrm9/malicious_extension_sentry/main/Malicious-Extensions.csv', 'extid'),
 }
 KEYFILE = CUSTOM.parent / 'abusech.key'
@@ -89,6 +90,7 @@ def _abusech(body, feed, out):
 def _parse(kind, body, feed, out):
     if kind == 'abusech': return _abusech(body, feed, out)
     if kind == 'electron': return
+    if kind == 'url': return out['urls'].update(dict.fromkeys((l.strip().lower().rstrip('/') for l in body.splitlines() if '://' in l), feed))
     if kind == 'extid': return out['extensions'].update(dict.fromkeys(EXT_ID.findall(body), feed))   # Chrome Web Store IDs
     for raw in body.splitlines():
         l = raw.strip()
@@ -240,6 +242,51 @@ def browsing():
             for path, (u, hit) in sorted(got.items()):
                 yield alert(f'{name} downloaded {os.path.basename(path)} from {u}, listed by {hit}',
                             fix=f'If it is still there, quarantine it: arche-defender quarantine "{path}". If you ran it, run a full scan and change your passwords from another device.')
+
+
+SHORTENERS = {'bit.ly', 'tinyurl.com', 't.co', 'goo.gl', 'is.gd', 'ow.ly', 'buff.ly', 'cutt.ly', 'rebrand.ly', 'shorturl.at',
+              't.ly', 'rb.gy', 'tiny.cc', 's.id', 'lnkd.in', 'qrco.de'}
+
+
+def site(host):
+    """The registrable name a host belongs to, roughly: paypal.com.evil.co.uk -> evil.co.uk."""
+    # ponytail: no Public Suffix List; 'com.au'-style second levels are the common case it gets right
+    p = host.split('.')
+    return '.'.join(p[-3:] if len(p) > 2 and len(p[-1]) == 2 and p[-2] in ('com', 'co', 'net', 'org', 'gov', 'edu', 'ac') else p[-2:])
+
+
+def link_signs(url):
+    """(danger reasons, caution notes) for a link, without visiting it."""
+    u = url.strip()
+    typed = bool(re.match(r'^[a-z][\w+.-]*:(?!\d)', u, re.I))   # 'example.com:8080/x' has no scheme
+    p = urllib.parse.urlsplit(u if typed else 'http://' + u)
+    host, bad, careful = (p.hostname or '').rstrip('.'), [], []
+    if hit := url_hit(u) or domain_hit(host) or ip_hit(host): bad.append(f'it is on a threat list ({hit})')
+    if p.scheme not in ('http', 'https'): bad.append(f'it is a {p.scheme}: link, which opens or runs something instead of a web page')
+    if p.username: bad.append(f'the "{p.username[:40]}@" part is decoration: the link really goes to {host}')
+    if re.search(r'\.(com|net|org|gov|edu)\.(?![a-z]{2}$)', host):
+        bad.append(f'the familiar name at the start is a disguise: the site is {site(host)}')
+    try: shown = '.'.join(l.encode().decode('idna') if l.startswith('xn--') else l for l in host.split('.'))
+    except UnicodeError: shown = host
+    if not shown.isascii():
+        if any(len({unicodedata.name(c, '?').split()[0] for c in l if c.isalpha()} & {'LATIN', 'CYRILLIC', 'GREEK'}) > 1 for l in shown.split('.')):
+            bad.append(f'it mixes alphabets to imitate another name: it reads as {shown}')
+        else: careful.append(f'it uses letters beyond plain a-z (reads as {shown}), a common way to imitate a real name')
+    try: ipaddress.ip_address(host); careful.append('it points at a bare IP address, which real companies rarely link to')
+    except ValueError: pass
+    if host in SHORTENERS: careful.append('it is a shortened link, so the real destination is hidden until you open it')
+    if typed and p.scheme == 'http': careful.append('it is not encrypted (http), so do not type passwords there')
+    return bad, careful
+
+
+@action('url-check', 'Check a link before you open it: threat-intel feeds and phishing tricks (offline, the link is not visited)', arg='url')
+def url_check(url):
+    bad, careful = link_signs(url)
+    head = 'Do not open it' if bad else 'Be careful' if careful else 'No warning signs'
+    out = '\n'.join([f'{head}: {url.strip()[:200]}', *(f'- {r}' for r in bad + careful)])
+    if feed_age_days() is None: out += '\n(Threat feeds are not downloaded yet: run intel-update for the full check.)'
+    elif not bad: out += '\n(Not on any downloaded threat list. New phishing sites appear hourly, so still check the address before signing in.)'
+    return out
 
 
 @action('password-check', 'Check whether a password is in known data breaches (only the first 5 characters of its SHA-1 leave this PC)', arg='password')

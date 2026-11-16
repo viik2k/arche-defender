@@ -90,6 +90,25 @@ class Lookup(unittest.TestCase):
             self.assertEqual([t for t, _, _ in intel.extensions()], [f'Brave: Bad [{"a" * 32}] is on the list of known malicious extensions'])
 
 
+class Links(unittest.TestCase):
+    def test_signs(self):
+        out = parsed('url', 'https://phish.example/Login/\nnot a url\n')
+        self.assertEqual(out['urls'], {'https://phish.example/login': 'feed'})
+        with mock.patch.object(intel, 'load', return_value=out):
+            bad = lambda u: intel.link_signs(u)[0]
+            self.assertIn('threat list (feed)', bad('https://phish.example/login')[0])
+            self.assertIn('the site is secure-login.top', bad('https://paypal.com.secure-login.top/x')[0])
+            self.assertEqual(bad('paypal.com.au/login'), [])
+            self.assertIn('really goes to 1.2.3.4', bad('https://google.com@1.2.3.4/')[0])
+            self.assertIn('mixes alphabets', bad('https://\u0430pple.com/')[0])   # Cyrillic a
+            self.assertIn('javascript: link', bad('javascript:alert(1)')[0])
+            self.assertEqual(intel.link_signs('example.com:8080/x'), ([], []))
+            self.assertIn('shortened', intel.link_signs('https://bit.ly/x')[1][0])
+            with mock.patch.object(intel, 'feed_age_days', return_value=1):
+                self.assertTrue(intel.url_check('https://www.paypal.com/').startswith('No warning signs'))
+        self.assertEqual(intel.site('a.b.evil.co.uk'), 'evil.co.uk')
+
+
 class Downloads(unittest.TestCase):
     def test_payload_url(self):
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
