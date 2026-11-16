@@ -34,6 +34,10 @@ class Browsers(unittest.TestCase):
         (prof / 'Login Data').unlink()
         with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Brave', str(prof))]), mock.patch.object(browsers, 'FIREFOX', []):
             self.assertEqual([t for t, _, _ in browsers.protection()][1], 'Brave: its sign-in cookies are protected only by a built-in key')
+        con = sqlite3.connect(prof / 'Web Data'); con.execute('CREATE TABLE credit_cards (card_number_encrypted BLOB)')
+        con.execute("INSERT INTO credit_cards VALUES (x'7631300102')"); con.commit(); con.close()
+        with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Brave', str(prof))]), mock.patch.object(browsers, 'FIREFOX', []):
+            self.assertEqual([t for t, _, _ in browsers.protection()][1], 'Brave: its sign-in cookies and 1 saved payment card are protected only by a built-in key')
         self.assertEqual(browsers.copy_query(self.d / 'missing', 'SELECT 1'), [])
 
     def test_password_checkup(self):

@@ -54,8 +54,10 @@ def protection():
         # v10 = encrypted with the fixed key Chromium uses when no keyring is available: any program (or a copied disk) can read them.
         n = (copy_query(f'{prof}/Login Data', "SELECT count(*) FROM logins WHERE CAST(substr(password_value, 1, 3) AS TEXT) = 'v10'") or [(0,)])[0][0]
         c = copy_query(f'{prof}/Cookies', "SELECT 1 FROM cookies WHERE CAST(substr(encrypted_value, 1, 3) AS TEXT) = 'v10' LIMIT 1")
-        if n or c:   # cookies: an infostealer replays them to be signed in as you, past passwords and 2FA
-            what = ' and '.join([f'{n} saved passwords'] * bool(n) + ['its sign-in cookies'] * bool(c))
+        k = (copy_query(f'{prof}/Web Data', "SELECT count(*) FROM credit_cards WHERE CAST(substr(card_number_encrypted, 1, 3) AS TEXT) = 'v10'") or [(0,)])[0][0]
+        if n or c or k:   # cookies: an infostealer replays them to be signed in as you, past passwords and 2FA
+            what = [f'{n} saved password{"s" * (n > 1)}'] * bool(n) + ['its sign-in cookies'] * bool(c) + [f'{k} saved payment card{"s" * (k > 1)}'] * bool(k)
+            what = ', '.join(what[:-1]) + ' and ' * (len(what) > 1) + what[-1]
             yield warn(f'{label(name, prof)}: {what} are protected only by a built-in key',
                        fix='Start the browser with --password-store=kwallet6 (KDE) or gnome-libsecret so the keyring protects them '
                            '(a Flatpak browser needs access to org.freedesktop.secrets), and keep passwords in a password manager.')
