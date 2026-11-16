@@ -1,4 +1,4 @@
-# Browsers: protection switched off (Safe Browsing), saved passwords kept under Chromium's built-in key,
+# Browsers: protection switched off (Safe Browsing), saved passwords and cookies kept under Chromium's built-in key,
 # managed policies that force extensions, proxies or search engines (how adware persists), and the root
 # certificates trusted beyond the OS bundle (an added root can read all HTTPS traffic).
 # Also browsers started with flags that hand over cookies or weaken HTTPS, and Firefox security prefs turned down.
@@ -52,8 +52,12 @@ def protection():
             yield warn(f'{label(name, prof)}: Safe Browsing is off', fix='Settings > Privacy and security > Security: choose Standard or Enhanced protection.')
         # v10 = encrypted with the fixed key Chromium uses when no keyring is available: any program (or a copied disk) can read them.
         n = (copy_query(f'{prof}/Login Data', "SELECT count(*) FROM logins WHERE CAST(substr(password_value, 1, 3) AS TEXT) = 'v10'") or [(0,)])[0][0]
-        if n: yield warn(f'{label(name, prof)}: {n} saved passwords are protected only by a built-in key',
-                         fix='Move them to a password manager, or start the browser with --password-store=kwallet6 (KDE) / gnome-libsecret so the keyring protects them.')
+        c = copy_query(f'{prof}/Cookies', "SELECT 1 FROM cookies WHERE CAST(substr(encrypted_value, 1, 3) AS TEXT) = 'v10' LIMIT 1")
+        if n or c:   # cookies: an infostealer replays them to be signed in as you, past passwords and 2FA
+            what = ' and '.join([f'{n} saved passwords'] * bool(n) + ['its sign-in cookies'] * bool(c))
+            yield warn(f'{label(name, prof)}: {what} are protected only by a built-in key',
+                       fix='Start the browser with --password-store=kwallet6 (KDE) or gnome-libsecret so the keyring protects them '
+                           '(a Flatpak browser needs access to org.freedesktop.secrets), and keep passwords in a password manager.')
     for prof in sorted({os.path.dirname(p) for r in FIREFOX for p in files(f'{r}/*/prefs.js')}):
         p, name = firefox_prefs(prof), f'Firefox ({os.path.basename(prof).partition(".")[2] or os.path.basename(prof)})'
         off = [k.split('.')[-2] for k in ('browser.safebrowsing.malware.enabled', 'browser.safebrowsing.phishing.enabled',

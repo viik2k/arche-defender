@@ -29,6 +29,11 @@ class Browsers(unittest.TestCase):
         with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Brave', str(prof))]), mock.patch.object(browsers, 'FIREFOX', []):
             r = [(t, s) for t, s, _ in browsers.protection()]
         self.assertEqual(r, [('Brave: Safe Browsing is off', WARN), ('Brave: 2 saved passwords are protected only by a built-in key', WARN)])
+        con = sqlite3.connect(prof / 'Cookies')
+        con.execute('CREATE TABLE cookies (encrypted_value BLOB)'); con.execute("INSERT INTO cookies VALUES (x'7631300102')"); con.commit(); con.close()
+        (prof / 'Login Data').unlink()
+        with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Brave', str(prof))]), mock.patch.object(browsers, 'FIREFOX', []):
+            self.assertEqual([t for t, _, _ in browsers.protection()][1], 'Brave: its sign-in cookies are protected only by a built-in key')
         self.assertEqual(browsers.copy_query(self.d / 'missing', 'SELECT 1'), [])
 
     def test_firefox_prefs(self):
