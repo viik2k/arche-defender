@@ -27,7 +27,10 @@ AI_RULES = [(n, s, re.compile(p, re.I), h) for n, s, p, h in (
      r"(hide|conceal|keep) (this|it|these|that) (secret |hidden )?from the user)", ('the user',)),
     ('prompt-injection phrasing', WARN, Q + r'\b(ignore (all |any )?(the )?(previous|prior|above|earlier) (instructions|prompts|rules)|'
                                         r'disregard (your|the|all) (instructions|guidelines|system prompt))', ('ignore', 'disregard')),
-    ('reads AI login credentials', ALERT, r'\.claude/\.credentials\.json|\.codex/auth\.json|gcloud/application_default_credentials',
+    # Mentioning the file is fine (a note, an existence check); reading, copying or sending it is not.
+    ('reads AI login credentials', ALERT, r'(?:\b(?:cat|less|more|head|tail|strings|cp|scp|rsync|tar|zip|base64|xxd|curl|wget|nc|jq|open|'
+     r'read\w*|load\w*|upload\w*|send\w*|exfil\w*|steal|grab|copy|print|dump|find|search|collect|harvest)\b[^\n]{0,60})'
+     r'(?:\.claude/\.credentials\.json|\.codex/auth\.json|gcloud/application_default_credentials)',
      ('credentials.json', 'auth.json', 'application_default')),
     ('sends data to a paste, tunnel or request-capture site', WARN,
      r'webhook\.site|requestbin|pipedream\.net|ngrok(-free)?\.(io|app)|trycloudflare\.com|pastebin\.com/api|transfer\.sh|'
@@ -60,6 +63,8 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
              '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json', '~/.continue/config.json',
              '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json',
              '~/.config/zed/settings.json')
+MEMORY_FILES = ('~/.claude/CLAUDE.md', '~/.claude/memory/*.md', '~/.claude/projects/*/memory/*.md', '~/.codex/AGENTS.md', '~/.gemini/GEMINI.md',
+                '~/.config/opencode/AGENTS.md', '~/.qwen/QWEN.md', '~/.windsurf/memories/*', '~/.codeium/windsurf/memories/*')
 CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
 SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.agents/skills', '~/.codex/skills', '~/.codex/prompts',
               '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules')
@@ -179,6 +184,8 @@ def contents():
     for root in SKILL_DIRS:
         if os.path.isdir(os.path.expanduser(root)): yield from scan_tree(os.path.expanduser(root), 'skill')
     for d in files(f'{CLAUDE_EXT}/*'): yield from scan_tree(d, 'Claude Desktop extension')
+    # Agent memory and global instructions load into every session: an injection an agent was tricked into saving stays there.
+    for f in files(*MEMORY_FILES): yield from scan_text(text(f), f'agent memory {tilde(f)}')
 
 
 @check('AI agent permissions', FAM)
