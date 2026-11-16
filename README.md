@@ -83,6 +83,7 @@ Also in the window's **Tools** menu.
 | `intel-update` | downloads the threat-intel feeds; scans themselves never use the internet (the full-scan UPnP check only talks to your router) |
 | `deps-update` | checks the lockfiles of the code projects in your home folder against the OSV database (osv.dev: GitHub, PyPI, RustSec and OpenSSF malicious-package advisories); only packages from the public registries are sent, never private package names |
 | `password-check` | tells you whether a password is in known data breaches (Have I Been Pwned range API: only the first 5 characters of its SHA-1 are sent) |
+| `scan PATH` | scans a file or folder now, as closely as a download (threat-intel hashes, the built-in rules, archives and documents, ClamAV and YARA when installed) and prints what it found |
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
