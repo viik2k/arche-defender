@@ -1,10 +1,11 @@
 # Privacy and devices: what can see or hear you right now, what sandboxed apps are allowed to touch,
 # and the hardware that is plugged in or paired (a new "keyboard" can be a BadUSB).
-import base64, configparser, grp, json, os, re
-from .core import check, alert, warn, item, sh, have, text, files, HOME
-from .ai import secret_kinds, repos
+import base64, configparser, grp, json, os, re, urllib.parse
+from .core import check, alert, warn, item, sh, have, text, files, HOME, ALERT
+from .ai import secret_kinds, repos, redact
 from .browsers import copy_query
-from .malware import walk
+from .malware import walk, match
+from .intel import link_signs
 
 
 def comm(pid): return text(f'/proc/{pid}/comm').strip() or f'pid {pid}'
@@ -236,6 +237,34 @@ def history():
                          fix='Delete those lines from the file and change the secrets. Start a command with a space to keep it out of '
                              'history (bash: HISTCONTROL=ignorespace), or pass secrets through a file or prompt instead.')
 
+
+
+CLICKFIX_FIX = ('If you did not type it yourself, a web page probably told you to paste it (a fake CAPTCHA or "fix it" page, called ClickFix): '
+                'run a full scan, check Startup entries and Scheduled tasks, and change your passwords from another device.')
+
+
+def history_rows(t, where):
+    """The malware rules over each history line: scripts piped straight from the internet listed by host, anything worse warned about."""
+    seen = set()
+    for l in t.splitlines():
+        for rule, sev, snip in match(l):
+            if rule != 'download piped into a shell':
+                row = (alert if sev == ALERT else warn)(f'{where}: {rule}: "{redact(snip)[:100]}"', fix=CLICKFIX_FIX)
+            elif not (u := re.search(r'''https?://[^\s"'|;)]+''', snip)): continue   # ponytail: an address in a variable is not followed
+            elif bad := link_signs(u[0])[0]:
+                row = alert(f'{where}: ran a script straight from {urllib.parse.urlsplit(u[0]).hostname}: {bad[0]}', fix=CLICKFIX_FIX)
+            else:
+                host = urllib.parse.urlsplit(u[0]).hostname or '?'
+                odd = 'from a bare IP address' if re.fullmatch(r'[\d.]+|[0-9a-f:]*:[0-9a-f:]*', host) else 'without encryption (http)' if u[0].startswith('http:') else ''
+                row = (warn(f'{where}: ran a script straight from {host} {odd}', fix=CLICKFIX_FIX) if odd else
+                       item(f'{where}: ran a script straight from {host}', fix='Installers piped into a shell run whatever that site serves; fine for sites you chose.'))
+            if row[0] not in seen: seen.add(row[0]); yield row
+
+
+@check('Risky commands in shell history', 'Threats')
+def history_commands():
+    """Commands in shell history that pipe a download into a shell, decode a hidden payload or open a reverse shell: what ClickFix pages make you paste."""
+    for f in files(*HISTORY): yield from history_rows(text(f), f.replace(HOME, '~'))
 
 # Clipboard managers that save their history to disk: KDE Klipper (Plasma 6) and GNOME's Clipboard Indicator.
 CLIPBOARDS = {'~/.local/share/klipper/history3.sqlite': 'KDE clipboard history',
