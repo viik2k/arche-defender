@@ -1,7 +1,7 @@
 # Run: python3 tests/test_devsources.py (or pytest)
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.devsources import config_rows
+from arche.devsources import config_rows, scripts_rows
 
 
 def rows(kind, t, project=False, where='f'): return [(s, x) for x, s, _ in config_rows(kind, where, t, project)]
@@ -54,5 +54,13 @@ def test_conda_gem_maven_composer():
     assert [s for s, _ in rows('composer', '{\n "config": {\n  "secure-http": false\n }\n}')] == [1]
 
 
+def test_install_scripts():
+    assert [s for s, _ in rows('npm', 'dangerously-allow-all-builds=true\n', True)] == [1]
+    assert [s for s, _ in rows('pnpm', 'packages:\n  - apps/*\ndangerouslyAllowAllBuilds: true\n', True)] == [1]
+    assert rows('pnpm', 'packages:\n  - apps/*\nonlyBuiltDependencies:\n  - esbuild\n', True) == []
+    assert [x[1] for x in scripts_rows('registry=https://registry.npmjs.org/\n# ignore-scripts=true\n')] == [0]
+    assert list(scripts_rows('ignore-scripts=true\n')) == []
+
+
 if __name__ == '__main__':
-    test_conda_gem_maven_composer(); test_pip(); test_requirements_from_a_cloned_repo(); test_npm_yarn_go_git(); test_uv_and_pyproject(); print('ok')
+    test_install_scripts(); test_conda_gem_maven_composer(); test_pip(); test_requirements_from_a_cloned_repo(); test_npm_yarn_go_git(); test_uv_and_pyproject(); print('ok')

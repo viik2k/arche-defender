@@ -2,7 +2,7 @@
 # safety checks off. AI agents run `pip install` and `npm install` all day, so a poisoned source reaches the PC through them too.
 # The OS's own repos and Flatpak remotes are in updates.py (Package sources).
 import re
-from .core import check, warn, item, text, files
+from .core import check, warn, item, text, files, have
 from .ai import repos, tilde
 
 DEFAULT = re.compile(r'^https://(pypi\.org|files\.pythonhosted\.org|registry\.npmjs\.org|registry\.yarnpkg\.com|github\.com|'
@@ -10,6 +10,8 @@ DEFAULT = re.compile(r'^https://(pypi\.org|files\.pythonhosted\.org|registry\.np
 HTTP = re.compile(r'\bhttp://(?!localhost\b|127\.0\.0\.1\b|\[::1\])([^\s/"\':]+)')
 CREDS = re.compile(r'\bhttps?://[^\s/:@"\']+:[^\s/@"\']+@([^\s/"\':]+)')
 TLS = 'anything on the network path (another device on your LAN, public Wi-Fi, a hostile router) can swap the code you install'
+BUILDS = 'lets every package run its install scripts, which pnpm otherwise asks about: the 2025 npm worms (Shai-Hulud, the Nx hack) spread through them'
+BUILDS_FIX = 'Remove it, and allow only the packages that need a build step (pnpm approve-builds)'
 RULES = {   # kind: (pattern, what it means, fix); a match on a line is a warning
     'pip': ((r'^\s*(?:--)?extra[-_]index[-_]url\b', 'adds a second package index: pip takes the newest version from either one, so a public '
              'package that copies the name of a private one gets installed instead (dependency confusion)',
@@ -20,7 +22,9 @@ RULES = {   # kind: (pattern, what it means, fix); a match on a line is a warnin
            (r'allow-insecure-host\s*=', f'turns off TLS checks for a package index: {TLS}', 'Remove allow-insecure-host')),
     'npm': ((r'^\s*strict-ssl\s*=\s*false', f'turns off TLS checks for the npm registry: {TLS}', 'Remove strict-ssl=false'),
             (r'^\s*(script-shell|node-options)\s*=\s*\S', 'changes what every npm script runs with (script-shell, or node-options '
-             'such as --require that loads a file into each Node process npm starts)', 'Remove that line unless you put it there')),
+             'such as --require that loads a file into each Node process npm starts)', 'Remove that line unless you put it there'),
+            (r'^\s*dangerously-allow-all-builds\s*=\s*true', BUILDS, BUILDS_FIX)),
+    'pnpm': ((r'^\s*dangerouslyAllowAllBuilds:\s*true', BUILDS, BUILDS_FIX),),
     'yarn': ((r'enableStrictSsl:\s*false|^\s*strict-ssl\s+false', f'turns off TLS checks for the registry: {TLS}', 'Remove that setting'),
              (r'unsafeHttpWhitelist:', f'lets yarn fetch packages over plain HTTP: {TLS}', 'Remove unsafeHttpWhitelist')),
     'go': ((r'^\s*GOINSECURE=\S', f'fetches Go modules without TLS checks: {TLS}', 'go env -u GOINSECURE'),
@@ -40,7 +44,7 @@ USER = {'pip': ('/etc/pip.conf', '/etc/xdg/pip/pip.conf', '~/.config/pip/pip.con
         'gem': ('/etc/gemrc', '~/.gemrc'), 'maven': ('~/.m2/settings.xml',), 'composer': ('~/.config/composer/config.json', '~/.composer/config.json')}
 # A cloned repo's own files: `npm install` or `pip install -r` inside it follows them, whoever wrote them.
 PROJECT = {'pip': ('requirements*.txt',), 'uv': ('uv.toml', 'pyproject.toml'), 'npm': ('.npmrc',), 'yarn': ('.yarnrc.yml', '.yarnrc'),
-           'bun': ('bunfig.toml',), 'cargo': ('.cargo/config.toml', '.cargo/config')}
+           'bun': ('bunfig.toml',), 'cargo': ('.cargo/config.toml', '.cargo/config'), 'pnpm': ('pnpm-workspace.yaml',)}
 
 
 def config_rows(kind, where, t, project=False):
@@ -62,6 +66,14 @@ def config_rows(kind, where, t, project=False):
                 yield item(f'{where}: {kind} gets packages from {u.split("@")[-1]}')
 
 
+def scripts_rows(npmrc):
+    """npm runs every package's install scripts unless ignore-scripts is set in an npmrc."""
+    if not re.search(r'^\s*ignore-scripts\s*=\s*true\b', npmrc, re.M | re.I):
+        yield item('npm runs the install scripts of every package it installs and of all their dependencies: the 2025 npm worms '
+                   '(Shai-Hulud, the Nx hack) spread that way, from one hijacked package to every PC that installed it',
+                   'npm config set ignore-scripts true (then npm rebuild <package> for one that needs its build step), or use pnpm, which asks first')
+
+
 @check('Developer package sources', 'Updates')
 def devsources():
     """Where pip, uv, npm, yarn, bun, cargo, go, git, conda, gem, Maven and Composer get code from, and settings that turn their TLS or checksum checks off."""
@@ -70,3 +82,4 @@ def devsources():
     for r in repos():
         for kind, pats in PROJECT.items():
             for f in files(*(f'{r}/{p}' for p in pats)): yield from config_rows(kind, tilde(f), text(f), project=True)
+    if have('npm'): yield from scripts_rows('\n'.join(map(text, files(*USER['npm']))))
