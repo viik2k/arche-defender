@@ -168,7 +168,10 @@ SECRET_FILES = ('~/.netrc', '~/.git-credentials', '~/.aws/credentials', '~/.conf
                 # AI sign-ins: each is a live token for the account, and any process running as you can lift it
                 '~/.gemini/oauth_creds.json', '~/.gemini/mcp-oauth-tokens.json', '~/.config/github-copilot/apps.json',
                 '~/.config/github-copilot/hosts.json', '~/.mcp-auth/*/*_tokens.json', '~/.local/share/opencode/auth.json',
-                '~/.cache/huggingface/token', '~/.huggingface/token', '~/.ollama/id_ed25519', '~/.openclaw/agents/*/agent/auth-profiles.json')
+                '~/.cache/huggingface/token', '~/.huggingface/token', '~/.ollama/id_ed25519', '~/.openclaw/agents/*/agent/auth-profiles.json',
+                # infostealers grab these too: FTP logins, the stream key (whoever has it streams as you), Terraform and Vault tokens
+                '~/.config/filezilla/sitemanager.xml', '~/.config/filezilla/recentservers.xml', '~/.config/obs-studio/basic/profiles/*/service.json',
+                '~/.terraform.d/credentials.tfrc.json', '~/.vault-token')
 
 
 def unencrypted_key(p):
@@ -190,6 +193,9 @@ def perms():
         yield warn('Git keeps passwords/tokens in plain text (~/.git-credentials)', 'git config --global credential.helper libsecret, then delete the file')
     if 'oauth_token:' in text(os.path.expanduser('~/.config/gh/hosts.yml')):
         yield warn('GitHub CLI token is stored in plain text', 'gh auth logout && gh auth login (uses the system keyring)')
+    if fz := [os.path.basename(f) for f in files('~/.config/filezilla/*.xml') if 'encoding="base64"' in text(f)]:
+        yield warn(f'FileZilla keeps FTP/SFTP passwords readable as plain text ({", ".join(fz)})',
+                   'FileZilla: Edit > Settings > Interface > Passwords > Use a master password')
     bare = [os.path.basename(p) for p in files('~/.ssh/*') if os.path.isfile(p) and unencrypted_key(p)]
     if bare: yield warn(f'{len(bare)} SSH private key(s) have no passphrase: anything that reads them can log in as you: {", ".join(bare)}',
                         'ssh-keygen -p -f ~/.ssh/<key> to add one (ssh-agent keeps it convenient)')
