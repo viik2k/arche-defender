@@ -40,6 +40,13 @@ AI_RULES = [(n, s, re.compile(p, re.I), h) for n, s, p, h in (
      ('webhook.site', 'requestbin', 'pipedream', 'ngrok', 'trycloudflare', 'pastebin', 'transfer.sh', 'interact.sh', 'oast.', 'burpcollab')),
     ('rewrites agent permissions or hooks', WARN, r'(>>?|\btee\b|write_text|writeFile\w*\(|json\.dump)[^\n]{0,80}\.claude/settings(\.local)?\.json',
      ('.claude/settings',)),
+    # ClawHavoc-style lures: a skill's "prerequisites" get the user to run the stealer themselves.
+    ('tells you to unpack a password-protected archive (how ClawHub stealers got past scanners)', WARN,
+     r'\b(extract|unzip|unpack|unrar|open)\b[^\n]{0,60}\b(with|using)\s+(the\s+)?password\b|\b(archive|zip|rar|7z)\s+password\s*[:=]',
+     ('password',)),
+    ('strips the macOS quarantine flag so Gatekeeper never checks the program', WARN, r'\bxattr\s+(-\w+\s+)*-[dc]\w*\s+(com\.apple\.quarantine)?', ('xattr',)),
+    ('downloads a program, makes it executable and runs it', WARN,
+     r'\b(curl|wget)\b[^\n]{0,200}?(-\w*[oO]\b|--output|>)\s*\S+[^\n]{0,120}\bchmod\s+(\+x|[0-7]*[157][0-7]{0,2})\b', ('chmod',)),
 )]
 SECRETS = (('Anthropic key', r'sk-ant-[\w-]{20,}'), ('OpenAI-style key', r'sk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{32,}'),
            ('GitHub token', r'gh[pousr]_[A-Za-z0-9]{30,}'), ('GitHub token', r'github_pat_\w{30,}'), ('Slack token', r'xox[abpr]-\d+-[\w-]{10,}'),
@@ -55,8 +62,8 @@ SCAN_EXT = {'.md', '.sh', '.bash', '.py', '.js', '.mjs', '.cjs', '.ts', '.json',
 PRUNE = {'node_modules', '.git', '.cache', '.local', '.var', '.steam', 'Steam', '.cargo', '.rustup', 'go', '.npm', '.nvm',
          'venv', '.venv', 'site-packages', 'target', 'dist', 'build', '.wine', 'Games', 'snap'}
 AI_PORTS = {11434: 'Ollama', 1234: 'LM Studio', 8188: 'ComfyUI', 7860: 'Gradio / Stable Diffusion WebUI', 7861: 'Gradio',
-            5001: 'KoboldCpp', 8080: 'llama.cpp / Open WebUI', 3000: 'Open WebUI', 9090: 'InvokeAI', 8000: 'vLLM'}
-AI_PROC = re.compile(r'ollama|llama|lms|lm-studio|comfy|python|koboldcpp|vllm|invokeai|open-webui|uvicorn|node', re.I)
+            5001: 'KoboldCpp', 18789: 'OpenClaw gateway', 8080: 'llama.cpp / Open WebUI', 3000: 'Open WebUI', 9090: 'InvokeAI', 8000: 'vLLM'}
+AI_PROC = re.compile(r'openclaw|ollama|llama|lms|lm-studio|comfy|python|koboldcpp|vllm|invokeai|open-webui|uvicorn|node', re.I)
 EDITORS = (('VS Code', '~/.vscode/extensions'), ('VS Code (Flatpak)', '~/.var/app/com.visualstudio.code/data/vscode/extensions'),
            ('VS Code Insiders', '~/.vscode-insiders/extensions'), ('VSCodium', '~/.vscode-oss/extensions'),
            ('VSCodium (Flatpak)', '~/.var/app/com.vscodium.codium/data/codium/extensions'), ('Cursor', '~/.cursor/extensions'),
@@ -74,10 +81,13 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
 PROJECT_MCP = ('.mcp.json', '.vscode/mcp.json', '.cursor/mcp.json', '.gemini/settings.json', '.roo/mcp.json', '.kiro/settings/mcp.json',
                '.amazonq/mcp.json', 'opencode.json', '.zed/settings.json')
 MEMORY_FILES = ('~/.claude/CLAUDE.md', '~/.claude/memory/*.md', '~/.claude/projects/*/memory/*.md', '~/.codex/AGENTS.md', '~/.gemini/GEMINI.md',
-                '~/.config/opencode/AGENTS.md', '~/.qwen/QWEN.md', '~/.windsurf/memories/*', '~/.codeium/windsurf/memories/*')
+                '~/.config/opencode/AGENTS.md', '~/.qwen/QWEN.md', '~/.windsurf/memories/*', '~/.codeium/windsurf/memories/*',
+                '~/.openclaw/workspace/*.md', '~/.openclaw/workspace/memory/*.md')   # OpenClaw re-reads HEARTBEAT.md on a timer
 CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
 SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.agents/skills', '~/.codex/skills', '~/.codex/prompts',
-              '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules')
+              '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules',
+              '~/.openclaw/skills', '~/.openclaw/workspace/skills')   # ClawHub skills: hundreds shipped stealers in 2026
+OPENCLAW = ('~/.openclaw/openclaw.json', '~/.clawdbot/clawdbot.json', '~/.moltbot/moltbot.json', '~/.openclaw/exec-approvals.json')
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.github/copilot-instructions.md')
 
 
@@ -216,6 +226,17 @@ def permissions():
         yield warn('Codex sandbox is off (sandbox_mode = "danger-full-access")', 'Use "workspace-write" in ~/.codex/config.toml')
     if re.search(r'"(yolo|autoAccept)"\s*:\s*true', text(f'{HOME}/.gemini/settings.json')):
         yield warn('Gemini CLI auto-accepts tool calls', 'Turn off autoAccept/yolo in ~/.gemini/settings.json')
+    for f in files(*OPENCLAW):   # JSON5, so plain regexes rather than a parser
+        t, where = text(f), tilde(f)
+        for k in sorted(set(re.findall(r'["\']?(dangerously\w+|allowInsecureAuth)["\']?\s*:\s*true', t))):
+            yield warn(f'OpenClaw has {k} switched on ({where})', f'Remove {k}: it turns off a protection of the gateway')
+        if re.search(r'dmPolicy["\']?\s*:\s*["\']open', t):
+            yield warn(f'OpenClaw takes orders from anyone who messages it (dmPolicy "open", {where}): a stranger can prompt-inject it',
+                       'Use dmPolicy "pairing" or "allowlist"')
+        if re.search(r'\bbind["\']?\s*:\s*["\'](lan|custom|0\.0\.0\.0)', t):
+            yield warn(f'OpenClaw gateway is set to listen on your network ({where})', 'Use bind "loopback" (reach it remotely over Tailscale or SSH)')
+        if re.search(r'\bsecurity["\']?\s*:\s*["\']full', t):
+            yield warn(f'OpenClaw may run any shell command without asking (exec security "full", {where})', 'Use "allowlist"')
     from .persistence import RC_FILES
     for f in files(*RC_FILES, '~/.config/fish/functions/*.fish', '~/.bash_aliases', '~/.zsh_aliases'):
         for l in text(f).splitlines():   # alias claude='claude --dangerously-skip-permissions': every session runs unguarded
@@ -272,7 +293,7 @@ CODE_ENV = {'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV', 
 
 AGENT_BYPASS = re.compile(r'^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo|--yes-always|'
                           r'--permission-mode=bypassPermissions|--approval-mode=yolo|--sandbox=danger-full-access)$')
-AGENT_NAME = re.compile(r'claude|codex|gemini|aider|opencode|goose|cursor-agent|qwen|amp|crush|cline', re.I)
+AGENT_NAME = re.compile(r'openclaw|claude|codex|gemini|aider|opencode|goose|cursor-agent|qwen|amp|crush|cline', re.I)
 
 
 @check('Running AI agents', FAM)
@@ -365,7 +386,8 @@ def keys():
     found = {}
     for f in files(*MCP_FILES, '~/.claude/settings.json', '~/.claude/settings.local.json', '~/.codex/config.toml', '~/.aider.conf.yml',
                    '~/.continue/config.yaml', '~/.config/litellm/*.yaml', '~/.config/fabric/.env', '~/.config/aichat/config.yaml',
-                   '~/.config/io.datasette.llm/keys.json', '~/.claude/plugins/cache/*/*/*/.mcp.json', '~/.env'):
+                   '~/.config/io.datasette.llm/keys.json', '~/.claude/plugins/cache/*/*/*/.mcp.json', '~/.env',
+                   *OPENCLAW, '~/.openclaw/.env', '~/.openclaw/agents/*/agent/auth-profiles.json'):
         if k := secret_kinds(text(f)): found[tilde(f)] = k
     for f, kinds in sorted(found.items()):
         yield warn(f'{f} holds {", ".join(kinds)} in plain text: any skill, plugin or npm install script can read it',
@@ -579,7 +601,7 @@ CHATS = (('Claude Code', ('~/.claude/projects/*/*.jsonl', '~/.claude/projects/*/
          ('Codex', ('~/.codex/sessions/*/*/*/*.jsonl', '~/.codex/history.jsonl'), 'history.persistence = "none" in ~/.codex/config.toml stops the prompt log'),
          ('Gemini CLI', ('~/.gemini/tmp/*/chats/*.json', '~/.gemini/tmp/*/logs.json'), None),
          ('opencode', ('~/.local/share/opencode/storage/*/*/*.json', '~/.local/share/opencode/storage/*/*/*/*.json'), None),
-         ('Continue', ('~/.continue/sessions/*.json',), None),
+         ('Continue', ('~/.continue/sessions/*.json',), None), ('OpenClaw', ('~/.openclaw/agents/*/sessions/*.jsonl',), None),
          ('Cursor', ('~/.config/Cursor/User/globalStorage/state.vscdb*', '~/.config/Cursor/User/workspaceStorage/*/state.vscdb*'), None),
          ('Windsurf', ('~/.config/Windsurf/User/globalStorage/state.vscdb*', '~/.config/Windsurf/User/workspaceStorage/*/state.vscdb*'), None),
          ('Copilot Chat', ('~/.config/Code/User/workspaceStorage/*/chatSessions/*.json',
