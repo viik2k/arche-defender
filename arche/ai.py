@@ -88,7 +88,10 @@ SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.
               '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules',
               '~/.openclaw/skills', '~/.openclaw/workspace/skills')   # ClawHub skills: hundreds shipped stealers in 2026
 OPENCLAW = ('~/.openclaw/openclaw.json', '~/.clawdbot/clawdbot.json', '~/.moltbot/moltbot.json', '~/.openclaw/exec-approvals.json')
-INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.github/copilot-instructions.md')
+INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.clinerules/*', '.roorules',
+                     '.rules', '.github/copilot-instructions.md', '.github/instructions/*', '.github/prompts/*', '.github/chatmodes/*',
+                     '.windsurf/rules/*', '.roo/rules/*', '.roo/rules-*/*', '.kiro/steering/*', '.amazonq/rules/*', '.continue/rules/*',
+                     '.junie/guidelines.md')   # the rules files a "rules file backdoor" hides instructions in
 
 
 def tilde(p): return str(p).replace(HOME, '~', 1)
