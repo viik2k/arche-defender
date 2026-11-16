@@ -39,6 +39,20 @@ def port_specs(specs):
     return [(pr, int(lo), int(hi or lo)) for lo, hi, pr in re.findall(r'(\d+)(?:-(\d+))?/(\w+)', specs)]
 
 
+FW_SERVICES = ('/etc/firewalld/services', '/usr/lib/firewalld/services')
+
+
+def service_ports(s, depth=0):
+    """A firewalld service's ports and those of the services it includes, from its XML (/etc overrides /usr/lib):
+    one firewall-cmd per service took a second."""
+    for d in FW_SERVICES:
+        try: root = ET.parse(f'{d}/{s}.xml').getroot()
+        except (OSError, ET.ParseError): continue
+        return ' '.join([f'{e.get("port")}/{e.get("protocol")}' for e in root.iter('port')] +
+                        [service_ports(e.get('service'), depth + 1) for e in root.iter('include') if depth < 5])
+    return ' '.join(re.findall(r'^\s+ports: (.*)$', sh('firewall-cmd', f'--info-service={s}'), re.M))
+
+
 def firewalld_open():
     """Ports firewalld lets in on real network interfaces, or None when a zone accepts everything."""
     rules = []
@@ -48,7 +62,7 @@ def firewalld_open():
         if conf.get('target') == 'ACCEPT': return None
         rules += port_specs(conf.get('ports', ''))
         for s in conf.get('services', '').split():
-            rules += port_specs(' '.join(re.findall(r'^\s+ports: (.*)$', sh('firewall-cmd', f'--info-service={s}'), re.M)))
+            rules += port_specs(service_ports(s))
     return rules
 
 

@@ -1,6 +1,7 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import unittest
+import tempfile, unittest
+from unittest import mock
 from arche import exposure
 from arche.core import WARN, INFO
 
@@ -31,6 +32,18 @@ class Exposed(unittest.TestCase):
                           (WARN, 'Redis (redis-server) on tcp port 6379 is reachable from your network')])
         self.assertEqual(len(list(exposure.exposed_rows(ls, None))), 4)
         self.assertEqual(list(exposure.exposed_rows(ls, [])), [])
+
+    def test_service_ports(self):
+        with tempfile.TemporaryDirectory() as etc, tempfile.TemporaryDirectory() as lib:
+            for d, name, body in ((lib, 'samba-client', '<include service="netbios-ns"/><port protocol="udp" port="138"/>'),
+                                  (lib, 'netbios-ns', '<port protocol="udp" port="137"/>'), (lib, 'loop', '<include service="loop"/>'),
+                                  (lib, 'kde', '<port protocol="tcp" port="1714-1764"/>'), (etc, 'kde', '<port protocol="tcp" port="1714"/>')):
+                with open(f'{d}/{name}.xml', 'w') as f: f.write(f'<service>{body}</service>')
+            with mock.patch.object(exposure, 'FW_SERVICES', (etc, lib)), mock.patch.object(exposure, 'sh', return_value='  ports: 9/udp\n'):
+                self.assertEqual(exposure.port_specs(exposure.service_ports('samba-client')), [('udp', 138, 138), ('udp', 137, 137)])
+                self.assertEqual(exposure.service_ports('kde'), '1714/tcp')
+                self.assertEqual(exposure.service_ports('loop'), '')
+                self.assertEqual(exposure.service_ports('custom'), '9/udp')
 
     def test_docker(self):
         rows = list(exposure.docker_rows('web\t0.0.0.0:8080->80/tcp, [::]:8080->80/tcp\ndb\t127.0.0.1:5432->5432/tcp\nold\t:::9000->9000/tcp'))
