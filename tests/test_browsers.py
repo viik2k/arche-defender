@@ -50,6 +50,20 @@ class Browsers(unittest.TestCase):
         self.assertEqual(r['Firefox (default-release) has certificate pinning off (security.cert_pinning.enforcement_level = 0)'], WARN)
         self.assertFalse(any('TLS' in t for t in r))
 
+    def test_firefox_primary_password(self):
+        prof = self.d / 'ab12.default-release'; prof.mkdir(); (prof / 'prefs.js').write_text('')
+        (prof / 'logins.json').write_text(json.dumps({'logins': [{}, {}]}))
+        def key4(rounds):   # the start of what certutil writes: PBES2, then PBKDF2 with a 32-byte salt and the round count
+            (prof / 'key4.db').unlink(missing_ok=True); con = sqlite3.connect(prof / 'key4.db')
+            r = rounds.to_bytes(1 if rounds < 128 else 2, 'big')
+            item2 = bytes.fromhex('308181306d06092a864886f70d01050d3060304106092a864886f70d01050c3034') + b'\x04\x20' + bytes(32) + bytes([2, len(r)]) + r
+            con.execute('CREATE TABLE metaData (id PRIMARY KEY, item1, item2)'); con.execute("INSERT INTO metaData VALUES ('password', x'00', ?)", (item2,))
+            con.commit(); con.close()
+            with mock.patch.object(browsers, 'chromium_profiles', return_value=[]), mock.patch.object(browsers, 'FIREFOX', [str(self.d)]):
+                return [t for t, _, _ in browsers.protection()]
+        self.assertEqual(key4(1), ['Firefox (default-release): 2 saved passwords are not protected by a Primary Password'])
+        self.assertEqual(key4(10000), [])
+
     def test_launch_flags(self):
         F = lambda *a: [f for f, _ in browsers.launch_flags(['chrome', *a])]
         self.assertEqual(F('--remote-debugging-port=9222'), ['--remote-debugging-port'])                       # default profile

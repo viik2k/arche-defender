@@ -68,9 +68,36 @@ def protection():
         if p.get('network.proxy.type') in (1, 2):
             where = p.get('network.proxy.autoconfig_url') or ', '.join(f'{p[k]}:{p.get(k + "_port", "")}' for k in ('network.proxy.http', 'network.proxy.socks') if p.get(k))
             yield item(f'{name}: sends traffic through a proxy ({where})', fix='Settings > General > Network Settings. Remove it unless you set it up.')
+        n = len(jsonf(f'{prof}/logins.json').get('logins') or [])
+        if n and no_primary_password(f'{prof}/key4.db'):   # infostealers decrypt these with no password, like Chromium's v10
+            yield warn(f'{name}: {n} saved passwords are not protected by a Primary Password',
+                       fix='Settings > Privacy & Security > Passwords: tick "Use a Primary Password", or keep passwords in a password manager.')
         for k, bad, what in FF_WEAK:
             if k in p and bad(p[k]): yield warn(f'{name} {what} ({k} = {json.dumps(p[k])})',
                                                fix=f'In about:config, reset {k} (and remove it from user.js in {prof.replace(HOME, "~")} if it is there).')
+
+
+PBKDF2 = bytes.fromhex('06092a864886f70d01050c')   # DER of OID 1.2.840.113549.1.5.12
+
+
+def der(b):
+    """(value, rest) of the DER element at the start of b."""
+    n, h = b[1], 2
+    if n & 0x80: h, n = 2 + (n & 0x7f), int.from_bytes(b[2:2 + (n & 0x7f)], 'big')
+    return b[h:h + n], b[h + n:]
+
+
+def no_primary_password(key4):
+    """Whether Firefox's key store has no Primary Password: NSS then derives its key with 1 PBKDF2 round, not 10000
+    (checked against key4.db files certutil made). None when unknown: no key4.db, or the pre-2020 3DES format."""
+    row = copy_query(key4, "SELECT item2 FROM metaData WHERE id = 'password'")
+    i = row[0][0].find(PBKDF2) if row and isinstance(row[0][0], bytes) else -1
+    if i < 0: return None
+    try:
+        params, _ = der(row[0][0][i + len(PBKDF2):])
+        _salt, rest = der(params)
+        return int.from_bytes(der(rest)[0], 'big') == 1
+    except IndexError: return None
 
 
 FF_WEAK = (('xpinstall.signatures.required', lambda v: v is False, 'installs extensions without Mozilla\'s signature check'),
