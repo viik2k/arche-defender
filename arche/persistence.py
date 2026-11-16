@@ -11,6 +11,8 @@ APPS = ('/usr/share/applications', '/usr/local/share/applications', '/var/lib/fl
         '~/.local/share/flatpak/exports/share/applications')
 GIT_RUNS = re.compile(r'^(core\.(sshcommand|hookspath|pager|askpass)|filter\..+\.(clean|smudge|process)|diff\..+\.(textconv|command)|'
                       r'merge\..+\.driver|gpg(\.\w+)?\.program)$')
+PM_HOOKS = ('/etc/dnf/libdnf5-plugins/actions.d/*.actions', '/etc/dnf/plugins/post-transaction-actions.d/*.action',
+            '/etc/apt/apt.conf.d/*', '/etc/pacman.d/hooks/*.hook')
 OFF = ('true', 'false', 'yes', 'no', 'on', 'off', '1', '0', '')
 
 
@@ -147,6 +149,14 @@ def hooks():
         if field(f, 'Name') in sysbus: yield alert(f'{f} takes over the system D-Bus service {field(f, "Name")}: {field(f, "Exec")}',
                                                    f'Inspect it, then delete {f}')
         else: yield item(f'D-Bus service: {f} -> {field(f, "Exec")}')
+    # Package-manager hooks run as root on every install or update (dnf5 actions, dnf4 post-transaction actions, apt
+    # Pre/Post-Invoke, pacman hooks); the ones packages ship are left out
+    pm = files(*PM_HOOKS)
+    for f in sorted(set(pm) - owned(pm)):
+        for l in lines(text(f)):
+            if f.endswith(('.action', '.actions')) or re.search(r'-Invoke\b|^Exec\s*=', l):
+                yield item(ver(f'Runs as root at every package install or update: {f}: {redact(l)[:150]}'))
+                yield from scan_text(l, f'package-manager hook {f}')
     tpl = ['/usr/share/git-core/templates']
     for scope in ('--system', '--global') if have('git') else ():
         conf = sh('git', 'config', scope, '--includes', '-l')

