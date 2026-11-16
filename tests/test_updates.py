@@ -27,6 +27,29 @@ class Pending(unittest.TestCase):
         self.assertEqual([c.args[3] for c in sh.call_args_list], ['check-upgrade', 'check-upgrade', 'advisory'])
 
 
+class Snaps(unittest.TestCase):
+    def test_rows(self):
+        listing = '''Name             Version   Rev    Tracking       Publisher     Notes
+core22           20240111  1122   latest/stable  canonical**   base
+code             e170252f  174    latest/stable  vscode**      classic
+mytool           0.1       x1     -              -             -
+tester           1.0       3      latest/edge    someone       devmode
+exodus-wallet    24.1      7      latest/stable  cryptoguy     -
+notes-app        2.0       12     latest/stable  indie*        held
+vlc              3.0       3777   latest/stable  videolan**    -
+'''
+        rows = [(s, t) for t, s, _ in updates.snap_rows(listing, 'timer: 00:00~24:00/4\nhold: forever\n')]
+        self.assertEqual(rows, [
+            (WARN, 'Snap updates are paused (forever)'),
+            (INFO, 'Snap code is unconfined (classic): it can read and change all your files, like a normal package'),
+            (WARN, 'Snap mytool was installed from a file without a store signature (--dangerous)'),
+            (WARN, 'Snap tester runs in devmode, without its sandbox'),
+            (INFO, 'Snap tester comes from an unverified publisher (someone)'),
+            (WARN, 'Snap exodus-wallet looks like a crypto wallet, but its publisher cryptoguy is not verified (fake wallet snaps steal recovery phrases)'),
+            (WARN, 'Updates for snap notes-app are paused')])
+        self.assertEqual(list(updates.snap_rows('', '')), [])
+
+
 class Hsi(unittest.TestCase):
     def test_levels(self):
         ok, bad = ['success'], []

@@ -146,6 +146,32 @@ def sources():
                 yield warn(f'Flatpak remote {m[1]} ({where}) installs apps without a signature check',
                            fix=f'Run: flatpak remote-modify {"--user " if where == "user" else ""}--gpg-verify {m[1]}  (or remove the remote)')
             else: yield item(f'Flatpak remote {m[1]} ({where}): {c[sec].get("url", "?")}')
+    if have('snap'): yield from snap_rows(sh('snap', 'list', '--unicode=never', timeout=30), sh('snap', 'refresh', '--time', timeout=30))
+
+
+WALLET = re.compile(r'wallet|exodus|ledger|trezor|metamask|electrum|bitcoin|ethereum|crypto|coin|phantom|atomic|monero', re.I)
+
+
+def snap_rows(listing, timer):
+    """Snaps installed from a file without a signature, unconfined ones, wallet look-alikes from unverified publishers (the
+    fake-wallet scams on the Snap Store) and paused updates. `snap list --unicode=never`: verified publishers end in **."""
+    if m := re.search(r'^hold:\s*(.+)$', timer, re.M):
+        yield warn(f'Snap updates are paused ({m[1].strip()})', fix='Run: sudo snap refresh --unhold')
+    for l in listing.splitlines()[1:]:
+        f = l.split()
+        if len(f) < 6: continue
+        name, rev, pub, notes = f[0], f[2], f[4], f[5].split(',')
+        if rev.startswith('x'):
+            yield warn(f'Snap {name} was installed from a file without a store signature (--dangerous)', fix=f'Unless you built it yourself: sudo snap remove {name}')
+        if 'devmode' in notes:
+            yield warn(f'Snap {name} runs in devmode, without its sandbox', fix=f'Devmode is for testing. Reinstall it from a stable channel, or: sudo snap remove {name}')
+        elif 'classic' in notes: yield item(f'Snap {name} is unconfined (classic): it can read and change all your files, like a normal package')
+        if 'held' in notes: yield warn(f'Updates for snap {name} are paused', fix=f'Run: sudo snap refresh --unhold {name}')
+        if pub == '-' or pub.endswith('*'): continue
+        if WALLET.search(name):
+            yield warn(f'Snap {name} looks like a crypto wallet, but its publisher {pub} is not verified (fake wallet snaps steal recovery phrases)',
+                       fix=f'Remove it (sudo snap remove {name}) and get the wallet from its maker\'s website. If you typed a recovery phrase into it, move the funds to a new wallet now.')
+        else: yield item(f'Snap {name} comes from an unverified publisher ({pub})')
 
 
 # Folders a Chromium runtime (marked by icudtl.dat) may sit in: packages, /opt, user installs, running AppImages, Flatpaks.

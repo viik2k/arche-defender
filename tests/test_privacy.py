@@ -33,6 +33,21 @@ class Flatpak(unittest.TestCase):
         self.assertEqual(list(privacy.flatpak_rows('a', 'not ini')), [])
 
 
+class Snap(unittest.TestCase):
+    def test_connections(self):
+        out = '''Interface                 Plug                        Slot                       Notes
+audio-playback            firefox:audio-playback      :audio-playback            -
+camera                    firefox:camera              :camera                    -
+personal-files            code:dot-vscode             :personal-files            -
+ssh-keys                  sshtool:ssh-keys            :ssh-keys                  manual
+content[gtk-3-themes]     firefox:gtk-3-themes        gtk-common-themes:gtk-3-themes  -
+'''
+        self.assertEqual([(s, t, f) for t, s, f in privacy.snap_rows(out)], [
+            (INFO, 'Snap firefox may use the camera', 'If it does not need it: sudo snap disconnect firefox:camera'),
+            (INFO, 'Snap code may read files outside its sandbox (dot-vscode)', 'If it does not need it: sudo snap disconnect code:dot-vscode'),
+            (WARN, 'Snap sshtool may read your SSH private keys', 'If it does not need it: sudo snap disconnect sshtool:ssh-keys')])
+
+
 class Wifi(unittest.TestCase):
     def test_rows(self):
         self.assertEqual(privacy.wifi_row('Cafe', '', '', 'yes', 'u1')[1], WARN)

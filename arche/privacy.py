@@ -118,15 +118,36 @@ def portal_rows(out):
 
 @check('App permissions', 'Privacy')
 def flatpak_perms():
-    """Flatpak sandbox holes (whole-disk access, all devices, X11-only, sandbox-escape D-Bus names), your overrides, and
-    camera, location, screenshot and remote-control grants remembered by the desktop portals."""
-    if not have('flatpak'): return
-    yield from portal_rows(sh('flatpak', 'permissions', timeout=10))
-    for app in sh('flatpak', 'list', '--app', '--columns=application').split():
-        yield from flatpak_rows(app, sh('flatpak', 'info', '--show-permissions', app, timeout=15))
-    for f in files('~/.local/share/flatpak/overrides/*', '/var/lib/flatpak/overrides/*'):
-        for l in text(f).splitlines():
-            if '=' in l: yield item(f'Flatpak override {os.path.basename(f)}: {l.strip()}')
+    """Flatpak sandbox holes (whole-disk access, all devices, X11-only, sandbox-escape D-Bus names), your overrides,
+    camera, location, screenshot and remote-control grants remembered by the desktop portals, and connected snap interfaces."""
+    if have('flatpak'):
+        yield from portal_rows(sh('flatpak', 'permissions', timeout=10))
+        for app in sh('flatpak', 'list', '--app', '--columns=application').split():
+            yield from flatpak_rows(app, sh('flatpak', 'info', '--show-permissions', app, timeout=15))
+        for f in files('~/.local/share/flatpak/overrides/*', '/var/lib/flatpak/overrides/*'):
+            for l in text(f).splitlines():
+                if '=' in l: yield item(f'Flatpak override {os.path.basename(f)}: {l.strip()}')
+    if have('snap'): yield from snap_rows(sh('snap', 'connections', timeout=30))
+
+
+SNAP_IFACES = {'camera': (item, 'may use the camera'), 'audio-record': (item, 'may record from the microphone'),
+               'home': (item, 'may read and change files in your home folder'), 'removable-media': (item, 'may read USB drives and SD cards'),
+               'personal-files': (item, 'may read files outside its sandbox'), 'system-files': (item, 'may read system files outside its sandbox'),
+               'location-observe': (item, 'may see your location'), 'raw-usb': (item, 'may talk to USB devices directly'),
+               'ssh-keys': (warn, 'may read your SSH private keys'), 'gpg-keys': (warn, 'may read your GPG private keys'),
+               'password-manager-service': (warn, 'may read passwords saved in the keyring'),
+               'docker': (warn, 'may control Docker (root-equivalent)'), 'kernel-module-control': (warn, 'may load kernel modules')}
+
+
+def snap_rows(out):
+    """Connected snap interfaces worth knowing about (`snap connections`: interface, plug, slot, notes)."""
+    for l in out.splitlines()[1:]:
+        f = l.split()
+        if len(f) < 3 or f[0] not in SNAP_IFACES or ':' not in f[1]: continue
+        sev, what = SNAP_IFACES[f[0]]
+        app = f[1].split(':')[0]
+        yield sev(f'Snap {app} {what}' + (f' ({f[1].split(":")[1]})' if f[0] in ('personal-files', 'system-files') else ''),
+                  fix=f'If it does not need it: sudo snap disconnect {f[1]}')
 
 
 def usb_devices(root='/sys/bus/usb/devices'):
