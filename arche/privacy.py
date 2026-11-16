@@ -60,10 +60,29 @@ def flatpak_rows(app, perms):
                 yield warn(f'Flatpak {app} {RISKY_TALK[name]} ({name})', fix=f'Run: flatpak override --user --no-talk-name={name} {app}')
 
 
+PORTAL = {('devices', 'camera'): 'may use the camera', ('location', 'location'): 'may see your location',
+          ('screenshot', 'screenshot'): 'may take screenshots without asking',
+          ('kde-authorized', 'remote-desktop'): 'may control your mouse and keyboard (remote desktop) without asking',
+          ('kde-authorized', 'screencast'): 'may record the screen without asking'}
+
+
+def portal_rows(out):
+    """Grants remembered by the desktop portals (`flatpak permissions`: table, object, app, permissions, data)."""
+    for l in out.splitlines():
+        f = l.split('\t')
+        if len(f) < 4 or (f[0], f[1]) not in PORTAL or not re.match(r'(yes|EXACT|NEIGHBORHOOD|CITY|COUNTRY)\b', f[3]): continue
+        who = f[2] or 'Unsandboxed apps (no app ID)'
+        if f[1] in ('remote-desktop', 'screencast'):
+            yield warn(f'{who} {PORTAL[f[0], f[1]]}', fix=f'Unless a tool you use needs it: flatpak permission-remove {f[0]} {f[1]} {f[2]}'.rstrip())
+        else: yield item(f'{who} {PORTAL[f[0], f[1]]}', fix=f'Revoke in System Settings > Application Permissions, or: flatpak permission-remove {f[0]} {f[1]} {f[2]}')
+
+
 @check('App permissions', 'Privacy')
 def flatpak_perms():
-    """Flatpak sandbox holes: whole-disk access, all devices, X11-only apps and sandbox-escape D-Bus names; plus your overrides."""
+    """Flatpak sandbox holes (whole-disk access, all devices, X11-only, sandbox-escape D-Bus names), your overrides, and
+    camera, location, screenshot and remote-control grants remembered by the desktop portals."""
     if not have('flatpak'): return
+    yield from portal_rows(sh('flatpak', 'permissions', timeout=10))
     for app in sh('flatpak', 'list', '--app', '--columns=application').split():
         yield from flatpak_rows(app, sh('flatpak', 'info', '--show-permissions', app, timeout=15))
     for f in files('~/.local/share/flatpak/overrides/*', '/var/lib/flatpak/overrides/*'):

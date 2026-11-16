@@ -83,3 +83,15 @@ class History(unittest.TestCase):
         for l in ok: self.assertEqual(privacy.history_secrets(l)[0], 0, l)
         n, kinds = privacy.history_secrets('\n'.join(bad))
         self.assertEqual(n, len(bad)); self.assertIn('GitHub token', kinds)
+
+
+class Portal(unittest.TestCase):
+    def test_rows(self):
+        out = ('notifications\tnotification\tio.x.A\tyes\t0x00\nkde-authorized\tremote-desktop\t\tyes\t0x00\n'
+               'devices\tcamera\torg.telegram.desktop\tyes\t0x00\ndevices\tcamera\tcom.x.B\tno\t0x00\n'
+               'location\tlocation\torg.gnome.Maps\tEXACT,1700000000\t0x00\n')
+        rows = list(privacy.portal_rows(out))
+        self.assertEqual([(s, t) for t, s, _ in rows],
+                         [(WARN, 'Unsandboxed apps (no app ID) may control your mouse and keyboard (remote desktop) without asking'),
+                          (INFO, 'org.telegram.desktop may use the camera'), (INFO, 'org.gnome.Maps may see your location')])
+        self.assertTrue(rows[0][2].endswith('permission-remove kde-authorized remote-desktop'))
