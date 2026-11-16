@@ -35,11 +35,30 @@ class Browsers(unittest.TestCase):
         prof = self.d / 'ab12.default-release'; prof.mkdir()
         (prof / 'prefs.js').write_text('user_pref("browser.safebrowsing.malware.enabled", false);\nuser_pref("network.proxy.type", 1);\n'
                                        'user_pref("network.proxy.socks", "10.0.0.5");\nuser_pref("network.proxy.socks_port", 1080);\n')
-        (prof / 'user.js').write_text('user_pref("browser.safebrowsing.phishing.enabled", false);\n')
+        (prof / 'user.js').write_text('user_pref("browser.safebrowsing.phishing.enabled", false);\nuser_pref("xpinstall.signatures.required", false);\n'
+                                      'user_pref("security.tls.version.min", 3);\nuser_pref("security.cert_pinning.enforcement_level", 0);\n')
         with mock.patch.object(browsers, 'chromium_profiles', return_value=[]), mock.patch.object(browsers, 'FIREFOX', [str(self.d)]):
             r = {t: s for t, s, _ in browsers.protection()}
         self.assertEqual(r['Firefox (default-release): Safe Browsing malware and phishing protection is off'], WARN)
         self.assertEqual(r['Firefox (default-release): sends traffic through a proxy (10.0.0.5:1080)'], INFO)
+        self.assertEqual(r["Firefox (default-release) installs extensions without Mozilla's signature check (xpinstall.signatures.required = false)"], WARN)
+        self.assertEqual(r['Firefox (default-release) has certificate pinning off (security.cert_pinning.enforcement_level = 0)'], WARN)
+        self.assertFalse(any('TLS' in t for t in r))
+
+    def test_launch_flags(self):
+        F = lambda *a: [f for f, _ in browsers.launch_flags(['chrome', *a])]
+        self.assertEqual(F('--remote-debugging-port=9222'), ['--remote-debugging-port'])                       # default profile
+        self.assertEqual(F('--remote-debugging-port=9222', '--user-data-dir=/tmp/playwright_x'), [])            # throwaway profile
+        self.assertEqual(F('--remote-debugging-port=0', '--user-data-dir=~/.config/google-chrome'), ['--remote-debugging-port'])
+        self.assertEqual(F('--load-extension=/tmp/x', '--load-extension=/tmp/y', '--no-sandbox'), ['--load-extension'])
+        apps = self.d / '.local/share/applications'; apps.mkdir(parents=True)
+        (apps / 'chrome.desktop').write_text('[Desktop Entry]\nExec=/usr/bin/google-chrome-stable --load-extension=/home/u/.x %U\n')
+        (apps / 'brave.desktop').write_text('[Desktop Entry]\nExec=flatpak run com.brave.Browser --proxy-server=socks5://1.2.3.4:1080\n')
+        (apps / 'other.desktop').write_text('[Desktop Entry]\nExec=myapp --load-extension=x\n')
+        (self.d / '.config').mkdir(); (self.d / '.config/chromium-flags.conf').write_text('# --load-extension=old\n--ignore-certificate-errors\n')
+        with mock.patch.object(browsers, 'HOME', str(self.d)), mock.patch.object(browsers, 'argv', return_value=[]):
+            r = sorted((s, t.split(' with ')[1].split(':')[0]) for t, s, _ in browsers.flags())
+        self.assertEqual(r, [(INFO, '--proxy-server'), (WARN, '--ignore-certificate-errors'), (WARN, '--load-extension')])
 
     def test_policies(self):
         r = {t.split(':')[0]: s for t, s, _ in browsers.policy_rows('Chrome', '/etc/x.json', {'ExtensionInstallForcelist': ['abc;https://x'], 'BrowserSignin': 0})}

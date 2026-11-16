@@ -1,11 +1,13 @@
 # Browsers: protection switched off (Safe Browsing), saved passwords kept under Chromium's built-in key,
 # managed policies that force extensions, proxies or search engines (how adware persists), and the root
 # certificates trusted beyond the OS bundle (an added root can read all HTTPS traffic).
-# Which extensions are installed is persistence.py's 'Browser extensions'.
-import json, os, re, shutil, sqlite3, tempfile
+# Also browsers started with flags that hand over cookies or weaken HTTPS, and Firefox security prefs turned down.
+# Which extensions are installed is persistence.py's 'Browser extensions'; --no-sandbox is hardening.py's 'App sandboxes'.
+import json, os, re, shlex, shutil, sqlite3, tempfile
 from pathlib import Path
 from .core import check, alert, warn, item, sh, have, text, files, jsonf, HOME
-from .persistence import CHROMIUM
+from .persistence import CHROMIUM, chromium_roots
+from .hardening import argv
 
 FIREFOX = [f'{HOME}/.mozilla/firefox', f'{HOME}/.config/mozilla/firefox', f'{HOME}/.var/app/org.mozilla.firefox/.mozilla/firefox']
 
@@ -54,12 +56,67 @@ def protection():
                          fix='Move them to a password manager, or start the browser with --password-store=kwallet6 (KDE) / gnome-libsecret so the keyring protects them.')
     for prof in sorted({os.path.dirname(p) for r in FIREFOX for p in files(f'{r}/*/prefs.js')}):
         p, name = firefox_prefs(prof), f'Firefox ({os.path.basename(prof).partition(".")[2] or os.path.basename(prof)})'
-        off = [k.split('.')[-2] for k in ('browser.safebrowsing.malware.enabled', 'browser.safebrowsing.phishing.enabled') if p.get(k) is False]
+        off = [k.split('.')[-2] for k in ('browser.safebrowsing.malware.enabled', 'browser.safebrowsing.phishing.enabled',
+                                          'browser.safebrowsing.downloads.enabled') if p.get(k) is False]
         if off: yield warn(f'{name}: Safe Browsing {" and ".join(off)} protection is off',
                            fix='Settings > Privacy & Security > Security: tick "Block dangerous and deceptive content".')
         if p.get('network.proxy.type') in (1, 2):
             where = p.get('network.proxy.autoconfig_url') or ', '.join(f'{p[k]}:{p.get(k + "_port", "")}' for k in ('network.proxy.http', 'network.proxy.socks') if p.get(k))
             yield item(f'{name}: sends traffic through a proxy ({where})', fix='Settings > General > Network Settings. Remove it unless you set it up.')
+        for k, bad, what in FF_WEAK:
+            if k in p and bad(p[k]): yield warn(f'{name} {what} ({k} = {json.dumps(p[k])})',
+                                               fix=f'In about:config, reset {k} (and remove it from user.js in {prof.replace(HOME, "~")} if it is there).')
+
+
+FF_WEAK = (('xpinstall.signatures.required', lambda v: v is False, 'installs extensions without Mozilla\'s signature check'),
+           ('security.tls.version.min', lambda v: isinstance(v, int) and v < 3, 'allows outdated TLS 1.0/1.1 connections'),
+           ('security.cert_pinning.enforcement_level', lambda v: v == 0, 'has certificate pinning off'),
+           ('security.mixed_content.block_active_content', lambda v: v is False, 'runs insecure scripts on secure pages'),
+           ('network.stricttransportsecurity.preloadlist', lambda v: v is False, 'ignores the HSTS preload list'))
+
+LAUNCH_FLAGS = {
+    '--remote-debugging-port': 'remote debugging on your real profile: any program on this PC can read its cookies and logins (cookie stealers do this)',
+    '--remote-debugging-pipe': 'remote debugging on your real profile: any program on this PC can read its cookies and logins (cookie stealers do this)',
+    '--load-extension': 'an extension loaded from a folder, outside the store',
+    '--ignore-certificate-errors': 'certificate errors ignored, so HTTPS traffic can be intercepted',
+    '--proxy-server': 'a proxy for all browsing', '--proxy-pac-url': 'a proxy for all browsing'}
+BROWSER_EXE = re.compile(r'(^|/)(chrome|chromium|chromium-browser|google-chrome(-stable)?|brave|brave-browser(-stable)?|msedge|microsoft-edge(-stable)?|vivaldi(-bin|-stable)?|helium)$')
+
+
+def launch_flags(args):
+    """(flag, why) for each risky flag. Remote debugging counts only on a real profile: test and debug tools
+    (Playwright, Puppeteer, VS Code) give the browser a throwaway --user-data-dir."""
+    udd = next((a.split('=', 1)[1] for a in args if a.startswith('--user-data-dir=')), '')
+    real = not udd or os.path.realpath(os.path.expanduser(udd)) in {os.path.realpath(r) for _, r in chromium_roots()}
+    for f in dict.fromkeys(a.split('=', 1)[0] for a in args):
+        if f in LAUNCH_FLAGS and (real or not f.startswith('--remote-debugging')): yield f, LAUNCH_FLAGS[f]
+
+
+def flag_row(where, f, why, fix):
+    return (item if f.startswith('--proxy') else warn)(f'{where} with {f}: {why}', fix=fix)
+
+
+@check('Browser launch flags', 'Browsers')
+def flags():
+    """Chromium-family browsers started (now, by a launcher, or by a *-flags.conf file) with flags that leak cookies or weaken HTTPS."""
+    running = set()
+    for pid in filter(str.isdigit, os.listdir('/proc')):
+        a = argv(pid)
+        if a and BROWSER_EXE.search(a[0]) and not any(x.startswith('--type=') for x in a):
+            running |= {(os.path.basename(a[0]), f, why) for f, why in launch_flags(a)}
+    for exe, f, why in sorted(running):
+        yield flag_row(f'{exe} is running', f, why, 'If you did not start it this way (a developer tool or test), close the browser, '
+                                                    'check its launchers and Startup entries, and sign out of important sites everywhere.')
+    for conf in files(f'{HOME}/.config/*-flags.conf'):
+        args = [a for l in text(conf).splitlines() if not l.lstrip().startswith('#') for a in l.split()]
+        for f, why in launch_flags(args): yield flag_row(f'{conf.replace(HOME, "~")} starts the browser', f, why, f'Remove {f} from {conf} unless you added it.')
+    for d in files(f'{HOME}/.local/share/applications/*.desktop', f'{HOME}/.config/autostart/*.desktop', f'{HOME}/Desktop/*.desktop'):
+        for ex in re.findall(r'^Exec=(.+)$', text(d), re.M):
+            try: args = shlex.split(ex)
+            except ValueError: continue
+            if not any(BROWSER_EXE.search(a) or a in {fl for _, _, fl in CHROMIUM} for a in args[:4]): continue   # also `flatpak run <id>`
+            for f, why in launch_flags(args): yield flag_row(f'Launcher {d.replace(HOME, "~")} starts a browser', f, why,
+                                                             f'Remove {f} from its Exec= line, or delete {d} if you did not make it (malware edits launchers this way).')
 
 
 CHROMIUM_POLICY_DIRS = {'Chrome': '/etc/opt/chrome/policies', 'Chromium': '/etc/chromium/policies', 'Brave': '/etc/brave/policies',
