@@ -1,7 +1,7 @@
 # Command line: the GUI by default, headless scans for scripts and timers, and the registered actions.
 import argparse, json, sys
 from concurrent.futures import ThreadPoolExecutor
-from . import core
+from . import core, __version__
 from .core import CHECKS, ACTIONS, INFO, WARN, ALERT, run_check, load_baseline, load_all
 
 SEV = {INFO: 'info', WARN: 'warn', ALERT: 'alert'}
@@ -66,6 +66,7 @@ def main(argv=None):
     load_all()
     p = argparse.ArgumentParser(prog='arche-defender', description='Open-source PC security sweep. No arguments opens the window.',
                                 epilog='actions: ' + '; '.join(f'{n}{" " + a.upper() if a else ""}: {h}' for n, (_, h, a) in ACTIONS.items()))
+    p.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     p.add_argument('action', nargs='?', choices=list(ACTIONS), help='run one action instead of scanning')
     p.add_argument('arg', nargs='?', help='the action\'s argument')
     p.add_argument('--selftest', action='store_true', help='run every check headless and print counts')

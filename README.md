@@ -1,41 +1,111 @@
 # Arche Defender
 
-A small desktop GUI that sweeps the usual persistence and tampering spots and tells you what changed since last time.
+An open-source security suite for Linux desktops in one window: malware and rootkit scans, a hardening audit,
+persistence tripwires, threat intel, privacy and update checks, and a scanner for the AI agents, skills, plugins and
+MCP servers you let act on your PC. It scores the machine, explains every finding with a fix, and remembers what was
+there last time so only changes stand out.
 
-One file, no dependencies, no root needed. It is read-only: it never kills, deletes or changes anything.
+Python 3 standard library only (plus tkinter for the window). No root needed, no telemetry. Scans are read-only:
+the only things that change your system are actions you run yourself (quarantine, restore, the background monitor,
+the threat-intel download).
 
-Built on Nobara (Fedora, KDE Plasma); needs Python 3 with tkinter.
+Built on Nobara (Fedora, KDE Plasma). Fedora-family checks use `rpm`/`dnf`; the rest is plain Linux.
 
 ## Run
 
-Run `./arche-defender.py`, or add it to the app menu:
+```sh
+./arche-defender.py            # the window
+./arche-defender.py --scan     # headless quick scan; exit 2 on alerts, 1 on warnings or new items, else 0
+./arche-defender.py --scan --full --json > scan.json
+./arche-defender.py --help     # every option and action
+./arche-defender.py --version
+```
+
+Add it to the app menu:
 
 ```sh
 printf '[Desktop Entry]\nType=Application\nName=Arche Defender\nExec=%s/arche-defender.py\nIcon=security-high\nCategories=System;Security;\nStartupWMClass=Arche-defender\n' "$PWD" > ~/.local/share/applications/arche-defender.desktop
 ```
 
-On the first run everything is green because there is no baseline. Review the lists, click **Accept as baseline**, and later scans highlight only what is new.
+On the first run nothing is marked new because there is no baseline. Read through the findings, then click
+**Accept as baseline** (or `--scan --accept`). Later scans mark anything that appeared since in amber.
+
+**Quick scan** takes seconds and skips the slow checks. **Full scan** adds the deep malware scan, `rpm -Va`
+over every packaged file, AI model files, browsing history against threat intel, Flatpak updates and ClamAV/YARA
+when installed.
 
 ## What it checks
 
-| Check | Red alert | Tracked against baseline |
-|---|---|---|
-| Security posture | firewalld not active, no package updates in 14 days | SELinux mode, Secure Boot |
-| Running programs | running from /tmp, /var/tmp, /dev/shm, memfd or Downloads | executables not from an RPM (Flatpak, Steam, home dir), deleted binaries still running |
-| Network listeners | | processes listening beyond loopback |
-| Startup entries | | XDG autostart, Plasma env/shutdown scripts, /etc/profile.d, shell rc and environment.d lines |
-| Scheduled tasks | | systemd timers (system and user), crontabs, cron.* scripts |
-| Services | | systemd services whose unit file is outside /usr (added by hand) |
-| Hijack points | /etc/ld.so.preload, LD_PRELOAD in environment files, sudo/ssh/su shadowed in a user bin dir or aliased in an rc file, pam_exec | udev rules that RUN a command |
-| Network settings | | hosts entries, DNS servers, proxy (env and KDE) |
-| Remote access and accounts | a second uid-0 account | sshd, RDP, VNC, RustDesk, AnyDesk, TeamViewer, Sunshine running; SSH authorized keys; Samba and NFS shares; login accounts; wheel members |
-| Browser extensions | | Chrome, Chromium, Edge, Brave, Vivaldi, Helium (native and Flatpak) and Firefox extensions, native messaging hosts |
-| Kernel modules | | out-of-tree or unsigned modules (NVIDIA is both on a stock install) |
+Every finding is an **alert** (red, -15 points), a **warning** (orange, -4) or an inventory item that is tracked
+against the baseline (-1 when new). Most come with a `fix:` line.
 
-Without root it cannot see other users' processes (root daemons' executables and listener owners), `/root`, sudoers or Samba usershares.
+| Family | What it looks at |
+|---|---|
+| Threats | Heuristic and hash scan of the folders droppers use (Downloads, Desktop, /tmp, ~/.local/bin, app launchers), a deeper scan of Documents, ~/.config, ~/.local/share and /opt, suspicious running processes, ClamAV/YARA, connections and browsing history matched against offline threat-intel feeds |
+| AI agents | Claude Code, Codex, Gemini CLI, Cursor, VS Code, Windsurf, Cline, Continue, Zed and friends: plugins, marketplaces, skills, hooks and MCP servers; skill and plugin files scanned for hidden Unicode instructions, prompt injection, credential theft and malicious commands; agents allowed to run without asking; unpinned `npx`/`uvx` MCP servers; plaintext API keys (the value is never shown); Ollama/LM Studio/ComfyUI open to the network; repos that auto-run tasks or hooks; pickle model files that run code when loaded |
+| Protection | firewalld zones and open port ranges, update age, SELinux, Secure Boot, disk encryption, kernel sysctls, autologin and screen lock, passwordless sudo, sshd config, permissions on SSH keys and token files, passphrase-less keys, setuid/setgid programs and file capabilities |
+| Integrity | `rpm -V` on the tools attackers swap (ls, ps, ss, sudo, sshd…), processes and kernel modules hidden from `/proc`, processes posing as kernel threads, code loaded from temp folders, LD_PRELOAD injection, promiscuous network cards, kernel taint |
+| Persistence | XDG autostart, Plasma scripts, shell rc files, systemd timers and services, cron, udev rules, ld.so.preload, PAM, shadowed sudo/ssh, browser extensions and native messaging hosts, out-of-tree kernel modules |
+| Network | listening programs, hosts file, DNS, proxies, remote-desktop tools, SSH keys, shares, accounts |
+| Processes | programs running from temp or download folders, memfd, deleted binaries, executables no package owns |
+| Activity | the last week of the journal: wrong-password bursts, SSH brute force and logins after it, new accounts, new admins |
+| Privacy | what is using the camera, microphone or screen right now; Flatpak apps allowed outside their sandbox |
+| Devices | USB and Thunderbolt devices (a new "keyboard" can be a BadUSB), paired Bluetooth devices and KDE Connect phones |
+| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations |
 
-## Notes
+Without root it cannot see other users' processes, `/root`, sudoers or the sshd config; those checks say so.
 
-- `baseline.json` is written beside the script and lists what is on your machine. It is git-ignored and mode 600; do not publish it.
-- `./arche-defender.py --selftest` runs every check headless and prints the counts.
-- It is a tripwire, not an antivirus: it shows changes, and you decide what they mean.
+## Background monitor
+
+```sh
+./arche-defender.py install-monitor     # systemd user timer: quick scan hourly, full scan weekly
+./arche-defender.py monitor-status
+./arche-defender.py uninstall-monitor
+```
+
+It runs at the lowest CPU and disk priority and sends a desktop notification only for findings it has not told you
+about yet.
+
+## Actions
+
+Also in the window's **Tools** menu.
+
+| Action | Does |
+|---|---|
+| `intel-update` | downloads the threat-intel feeds; the only network access the tool makes |
+| `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
+| `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
+
+## Privacy of its own data
+
+The baseline, quarantine, intel cache and monitor state live in `~/.local/state/arche-defender/`, mode 700/600.
+They describe your machine: do not publish them. Reports (**Save report**, HTML or JSON) contain the same and are
+written mode 600. Secret files such as `~/.claude/.credentials.json` are only `stat`ed for their permissions, never read,
+and detected API keys are reported by type and file, never by value.
+
+## Development
+
+```
+arche-defender.py   launcher
+arche/core.py       check/action registry, baseline, scoring, helpers
+arche/cli.py        arguments, headless scan, self-test
+arche/gui.py        tkinter window (scans on worker threads)
+arche/report.py     HTML/JSON reports
+arche/<family>.py   the checks; every module in arche/ is loaded automatically
+tests/test_*.py     run each with python3, or pytest from the repo root
+```
+
+A check is a generator registered with a decorator:
+
+```python
+from .core import check, alert, warn, item
+
+@check('My check', 'Protection', slow=False)
+def my_check():
+    yield warn('Something is off', 'How to fix it')   # alert(), warn(), item()
+```
+
+`./arche-defender.py --selftest` runs every check, including the slow ones, and fails if any of them crashes.
+
+It is a tripwire and an auditor, not a replacement for judgement: it shows what is there and what changed, and you
+decide what it means.

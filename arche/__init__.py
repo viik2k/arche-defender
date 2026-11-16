@@ -1,2 +1,2 @@
-"""Arche Defender: an open-source, read-only security sweep for Linux desktops."""
-__version__ = '0.2.0'
+"""Arche Defender: an open-source, security suite for Linux desktops."""
+__version__ = '0.3.0'
