@@ -62,7 +62,8 @@ SECRET_S = [(k, re.compile(p)) for k, p in SECRETS]
 SECRET_B = [(k, re.compile(p.encode())) for k, p in SECRETS]
 FAKE = r'(?i)x{5}|your|example|changeme|placeholder|redacted|dummy|abcdef|123456'   # docs, templates and test fixtures, not keys
 FAKE_S, FAKE_B = re.compile(FAKE), re.compile(FAKE.encode())
-SCAN_EXT = {'.md', '.sh', '.bash', '.py', '.js', '.mjs', '.cjs', '.ts', '.json', '.ps1', '.toml', '.yaml', '.yml', '.txt', ''}
+SCAN_EXT = {'.md', '.sh', '.bash', '.zsh', '.fish', '.py', '.js', '.mjs', '.cjs', '.ts', '.mts', '.cts', '.jsx', '.tsx', '.json', '.ps1', '.psm1',
+            '.bat', '.cmd', '.vbs', '.rb', '.pl', '.php', '.lua', '.html', '.htm', '.toml', '.yaml', '.yml', '.txt', ''}
 PRUNE = {'node_modules', '.git', '.cache', '.local', '.var', '.steam', 'Steam', '.cargo', '.rustup', 'go', '.npm', '.nvm',
          'venv', '.venv', 'site-packages', 'target', 'dist', 'build', '.wine', 'Games', 'snap'}
 AI_PORTS = {11434: 'Ollama', 1234: 'LM Studio', 8188: 'ComfyUI', 7860: 'Gradio / Stable Diffusion WebUI / Langflow', 7861: 'Gradio',
@@ -126,16 +127,44 @@ def scan_text(t, where):
         yield (alert if s == ALERT else warn)(f'{where}: {n}: "{snip.strip()}"', 'Read it before your agent runs it again; remove the plugin/skill if you did not expect this')
 
 
-def scan_tree(root, label, limit=1 << 20):
+# What a skill or plugin has no reason to link to: whatever reads the skill (your agent, a sync, a zip you share) reads this too.
+SECRET_LINK = re.compile(r'~(/(\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.azure|\.netrc|\.git-credentials|\.password-store|\.pki|\.mozilla|\.claude\.json|'
+                         r'\.config/(gcloud|gh|google-chrome|chromium|BraveSoftware|microsoft-edge|vivaldi|op|Bitwarden)|\.local/share/keyrings|'
+                         r'\.claude/\.credentials\.json|\.codex/auth\.json)(/|$)|$)')
+
+
+def scan_tree(root, label, limit=8 << 20, seen=None):
+    """Rule hits in a skill, plugin or add-on folder, the files it links to outside itself, and known-bad compiled programs in it."""
+    from . import malware
+    top, seen = os.path.realpath(root), seen if seen is not None else set()
+    seen.add(top)
     for d, dirs, fs in os.walk(root):
         dirs[:] = [x for x in dirs if x not in ('node_modules', '.git') and not x.startswith(('temp_git_', '.staging', '.replaced-'))]
+        for x in (*dirs, *fs):
+            if os.path.islink(p := os.path.join(d, x)): yield from link_rows(p, top, label, limit, seen)
         for f in fs:
             p = os.path.join(d, f)
-            if os.path.splitext(f)[1].lower() not in SCAN_EXT or os.path.islink(p): continue
-            try:
-                if os.path.getsize(p) > limit: continue
+            try: st = os.lstat(p)
             except OSError: continue
-            yield from scan_text(text(p), f'{label} {tilde(p)}')
+            if os.path.islink(p) or st.st_size > limit: continue
+            try:
+                with open(p, 'rb') as fh: head = fh.read(4)
+            except OSError: continue
+            if head.startswith(tuple(MAGIC)): yield from malware.inspect(p, st, False)   # known-malware hashes, UPX, pool URLs in strings
+            elif os.path.splitext(f)[1].lower() in SCAN_EXT: yield from scan_text(text(p), f'{label} {tilde(p)}')
+
+
+def link_rows(p, top, label, limit, seen):
+    t = os.path.realpath(p)
+    if t == top or t.startswith(top + '/'): return   # its own files, scanned anyway
+    if not os.path.exists(t): yield item(f'{label} link {tilde(p)} points to {os.readlink(p)}, which is missing'); return
+    if SECRET_LINK.match(tilde(t)):
+        yield alert(f'{label} {tilde(p)} links to {tilde(t)}: whatever reads the {label} (your agent, a sync, a zip you share) reads that too',
+                    f'Delete the link {tilde(p)}, and the {label} itself unless you made that link')
+    elif t.startswith(HOME + '/') and t not in seen and not top.startswith(t + '/'):   # system files are the system's; a parent folder holds us
+        yield item(f'{label} {tilde(p)} links to {tilde(t)}')
+        if os.path.isdir(t): yield from scan_tree(t, label, limit, seen)
+        elif os.path.splitext(t)[1].lower() in SCAN_EXT and os.path.getsize(t) <= limit: seen.add(t); yield from scan_text(text(t), f'{label} {tilde(p)}')
 
 
 def fingerprint(root, ext=None):
