@@ -1,7 +1,7 @@
 # Run: python3 tests/test_persistence.py (or pytest)
 import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.persistence import hooks, chromium_roots, chromium_extensions, install_cmds, git_runs, dns_rows
+from arche.persistence import hooks, chromium_roots, chromium_extensions, install_cmds, git_runs, dns_rows, pam_rows, lib_dir_rows, user_writable
 
 
 def test_hooks():
@@ -137,5 +137,16 @@ def test_package_hooks():
     assert rows[1][0].startswith('Runs as root at every package install or update: ~/x.actions: post_transaction') and rows[2][1] == 1 and len(rows) == 3, rows
 
 
+def test_pam_and_lib_dirs():
+    conf = 'auth sufficient pam_unix.so\n#auth required pam_ghost.so\nauth optional /opt/x/pam_evil.so\n'
+    rows = list(pam_rows({'/usr/lib64/security/pam_unix.so', '/opt/x/pam_evil.so', '/usr/lib64/security/pam_ghost.so'}, conf, {'/usr/lib64/security/pam_unix.so'}))
+    assert [(r[0].split(' came')[0], r[1]) for r in rows] == [('PAM module /opt/x/pam_evil.so', 2), ('PAM module /usr/lib64/security/pam_ghost.so', 1)], rows
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    assert user_writable(d) and user_writable(f'{d}/not/yet') and not user_writable('/usr/lib64/nothing-here')
+    rows = list(lib_dir_rows({'/etc/ld.so.conf.d/a.conf': f'# x\n{d}/lib\n/usr/lib64/x\n', '/etc/ld.so.conf.d/b.conf': '/usr/lib64/ffmpeg\n',
+                              '/etc/ld.so.conf': 'include ld.so.conf.d/*.conf\n'}))
+    assert [r[1] for r in rows] == [2, 0] and f'{d}/lib' in rows[0][0] and '/usr/lib64/x' not in rows[0][0], rows
+
+
 if __name__ == '__main__':
-    test_package_hooks(); test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_root_groups(); test_install_cmds(); print('ok')
+    test_pam_and_lib_dirs(); test_package_hooks(); test_hooks(); test_dns_rows(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_unpacked_extensions(); test_dropins(); test_root_groups(); test_install_cmds(); print('ok')

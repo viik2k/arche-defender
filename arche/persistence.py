@@ -130,6 +130,13 @@ def hijack():
                              *(f'{d}/systemd/{k}-generators/*' for d in ('/etc', '/usr/local/lib') for k in ('system', 'user')))
             if os.path.isfile(f)]
     for f in sorted(set(root) - owned(root)): yield item(ver(f'Runs as root by itself: {f}'))
+    # A rogue PAM module is a classic backdoor: it reads the password at every login and sudo, or accepts a magic one
+    conf = '\n'.join(map(text, files('/etc/pam.d/*')))
+    pm = {os.path.realpath(p) for p in files(*(f'{d}/*.so' for d in PAM_DIRS))} | {p for p in re.findall(r'^[^#\n]*?\s(/\S+\.so)\b', conf, re.M) if os.path.isfile(p)}
+    yield from pam_rows(pm, conf, owned(pm))
+    # ponytail: unowned ld.so.conf.d files only; a package's own file edited in place needs rpm -V / debsums
+    ld = files('/etc/ld.so.conf', '/etc/ld.so.conf.d/*.conf')
+    yield from lib_dir_rows({f: text(f) for f in sorted(set(ld) - owned(ld))})
     mods = files('/etc/modprobe.d/*.conf', '/usr/lib/modprobe.d/*.conf', '/usr/local/lib/modprobe.d/*.conf')
     for f in sorted(set(mods) - owned(mods)):
         for mod, cmd in install_cmds(text(f)):
@@ -140,6 +147,37 @@ def hijack():
         if interp in pkg: continue
         yield (alert if interp.startswith(('/tmp/', '/var/tmp/', '/dev/shm/', '/home/')) else item)(
             f'Every program of the {os.path.basename(f)} binary format runs through {interp}', 'Inspect it, then: echo -1 | sudo tee ' + f)
+
+
+PAM_DIRS = tuple(f'{d}/security' for d in ('/usr/lib64', '/usr/lib', '/usr/lib/x86_64-linux-gnu', '/lib/x86_64-linux-gnu', '/usr/lib/aarch64-linux-gnu'))
+
+
+def user_writable(p):
+    """Whether someone other than root can change p, or create it: the nearest existing folder up decides."""
+    while not os.path.exists(p): p = os.path.dirname(p) or '/'   # ponytail: the nearest existing level only, not every parent
+    st = os.stat(p)
+    return st.st_uid != 0 or bool(st.st_mode & 0o002 or st.st_mode & 0o020 and st.st_gid != 0)
+
+
+def lib_dir_rows(confs, writable=user_writable):
+    """ld.so.conf(.d) files as {path: text}: the folders every program, root's included, loads shared libraries from."""
+    for f, t in confs.items():
+        dirs = [d for d in lines(t) if not d.startswith('include')]
+        if bad := [d for d in dirs if writable(d)]:
+            yield alert(f'{f} makes every program, root\'s included, load libraries from {", ".join(bad)}, which a user can write to',
+                        f'Unless you know why it is there, remove that line from {f} and run sudo ldconfig')
+        elif dirs: yield item(f'{f} adds library folders for every program: {", ".join(dirs)}')
+
+
+def pam_rows(mods, conf, pkg):
+    """PAM modules no package installed (`pkg` is the owned subset of `mods`); one /etc/pam.d loads (`conf`) sees every password typed."""
+    conf = '\n'.join(lines(conf))   # a commented-out line loads nothing
+    for m in sorted(set(mods) - set(pkg)):
+        used = re.search(rf'(^|[\s/]){re.escape(os.path.basename(m))}\b', conf, re.M)
+        yield (alert if used else warn)(
+            f'PAM module {m} came from no installed package' + (': /etc/pam.d loads it, so it sees every password typed at login, sudo and the lock screen'
+                                                               if used else ' (nothing in /etc/pam.d loads it yet)'),
+            'If you did not build and install it yourself, remove it and the /etc/pam.d lines that load it, then change your password')
 
 
 def install_cmds(t):
