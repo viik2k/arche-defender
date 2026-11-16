@@ -1,5 +1,6 @@
 # Activity from the system journal over the last week: bursts of wrong passwords (lock screen, sudo, login,
-# admin prompts), SSH brute force and any login that followed it, new login accounts, and users given admin rights.
+# admin prompts), SSH brute force and any login that followed it, new login accounts, users given admin rights, and
+# protections switched off through sudo or pkexec.
 # Who is in wheel right now is persistence.py; this module reports what changed and when.
 import json, re, time
 from collections import defaultdict
@@ -16,6 +17,19 @@ ADMIN = {'wheel': 'can run anything as root with sudo', 'sudo': 'can run anythin
          'admin': 'can run anything as root with sudo', 'root': 'root group',
          'docker': 'root-equivalent: docker can mount / without a password', 'libvirt': 'root-equivalent through VMs',
          'lxd': 'root-equivalent through containers', 'disk': 'can read every disk directly', 'adm': 'can read all system logs'}
+
+TAMPER = [(re.compile(p), what) for p, what in (
+    (r'\bsetenforce\s+(0|[Pp]ermissive)\b', 'put SELinux in permissive mode'),
+    (r'\bsystemctl\b.*\b(stop|disable|mask)\b.*\b(firewalld|ufw|nftables|apparmor|auditd|fapolicyd|clamd\S*|clamav\S*)\b', 'stopped a protection service'),
+    (r'\bufw\s+disable\b|\bfirewall-cmd\b.*(--set-default-zone[= ]trusted|--set-target[= ]ACCEPT)', 'opened the firewall'),
+    (r'\b(ip6?tables)\s+(-F|--flush)\b|\bnft\s+flush\s+ruleset\b', 'flushed the firewall rules'),
+    (r'/etc/sudoers|\bvisudo\b', 'changed who may use sudo'),
+    (r'\bpasswd\s+(-d|--delete)\b', 'removed an account password'),
+    (r'\bmokutil\s+--disable-validation\b', 'turned off Secure Boot checks'),
+    (r'\b(mitigations=off|selinux=0|enforcing=0|apparmor=0)\b', 'weakened the kernel command line'),
+    (r'\bsysctl\b.*\b(ptrace_scope|kptr_restrict|randomize_va_space|dmesg_restrict|unprivileged_bpf_disabled)\s*=\s*0\b', 'weakened kernel hardening'),
+    (r'\bchmod\s+(-R\s+)?0?777\s+/(etc|usr|bin|sbin|boot|lib)', 'made system files writable by everyone'),
+    (r'\b(rm|truncate|shred)\b.*\s/var/log/|\bjournalctl\b.*--vacuum|\bchattr\s+[-+]i\b', 'deleted logs or changed immutable files'))]
 
 
 def journal(days=DAYS):
@@ -52,6 +66,10 @@ def analyse(events):
             yield alert(f'An account without admin rights tried sudo on {when(t)}: {m.strip()[:120]}',
                         fix='If that was not you, check what runs under that account (another user, or malware).')
         # "Failed password for invalid user" repeats the "Invalid user" line, so only one of the two is counted.
+        elif ident in ('sudo', 'pkexec') and (c := re.search(r'COMMAND=([^\]\n]+)', m)):
+            if what := next((w for rx, w in TAMPER if rx.search(c[1])), None):
+                yield warn(f'{what[0].upper()}{what[1:]} with {ident} on {when(t)}: {c[1].strip()[:120]}',
+                           fix='If you did not do this, undo it and look at what else ran then (Software installed this week, Startup entries).')
         elif r := re.search(r'Failed \S+ for (?!invalid user )\S+ from (\S+)|Invalid user \S* ?from (\S+)', m):
             ssh_bad[r[1] or r[2]] += 1
         elif r := re.search(r'Accepted (\S+) for (\S+) from (\S+)', m): ssh_ok.setdefault((r[2], r[3]), r[1])

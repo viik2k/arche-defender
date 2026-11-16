@@ -34,6 +34,18 @@ class Analyse(unittest.TestCase):
         self.assertEqual(r['SSH login as root from 203.0.113.9 succeeded after 5 failures'], ALERT)
         self.assertEqual(r['SSH login as finn from 192.168.4.20 (publickey)'], INFO)
 
+    def test_tamper(self):
+        sudo = lambda c: (0, 'sudo', f'finn : TTY=pts/1 ; PWD=/home/finn ; USER=root ; COMMAND={c}')
+        bad = ['/usr/sbin/setenforce 0', '/usr/bin/systemctl disable --now firewalld', '/usr/sbin/ufw disable', '/usr/sbin/visudo',
+               '/usr/bin/tee /etc/sudoers.d/nopw', '/usr/sbin/nft flush ruleset', '/usr/sbin/sysctl -w kernel.yama.ptrace_scope=0',
+               '/usr/bin/rm -rf /var/log/secure', '/usr/sbin/grubby --update-kernel=ALL --args=mitigations=off']
+        ok = ['/usr/sbin/dnf install x', '/usr/sbin/systemctl restart firewalld', '/usr/sbin/systemctl enable sshd', '/usr/sbin/setenforce 1',
+              '/usr/sbin/sysctl -w kernel.yama.ptrace_scope=1', '/usr/bin/chmod 755 /usr/local/bin/x']
+        for c in bad: self.assertEqual([s for _, s, _ in run([sudo(c)])], [WARN], c)
+        for c in ok: self.assertEqual(run([sudo(c)]), [], c)
+        r = run([(0, 'pkexec', 'finn: Executing command [USER=root] [TTY=unknown] [CWD=/home/finn] [COMMAND=/usr/sbin/setenforce 0]')])
+        self.assertTrue(r[0][0].startswith('Put SELinux in permissive mode with pkexec'))
+
     def test_accounts(self):
         ev = [(0, 'useradd', 'new user: name=eve, UID=1001, GID=1001, home=/home/eve'),
               (0, 'useradd', 'new user: name=ollama, UID=971, GID=969'),
