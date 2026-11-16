@@ -4,7 +4,7 @@ import json, shutil, sqlite3, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 from arche import browsers
-from arche.core import WARN, INFO
+from arche.core import ALERT, WARN, INFO
 
 CERTUTIL = """
 Certificate Nickname                                         Trust Attributes
@@ -35,6 +35,15 @@ class Browsers(unittest.TestCase):
         with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Brave', str(prof))]), mock.patch.object(browsers, 'FIREFOX', []):
             self.assertEqual([t for t, _, _ in browsers.protection()][1], 'Brave: its sign-in cookies are protected only by a built-in key')
         self.assertEqual(browsers.copy_query(self.d / 'missing', 'SELECT 1'), [])
+
+    def test_password_checkup(self):
+        prof = self.d / 'Default'; prof.mkdir()
+        con = sqlite3.connect(prof / 'Login Data')
+        con.execute('CREATE TABLE insecure_credentials (parent_id, insecurity_type, create_time, is_muted)')
+        con.executemany('INSERT INTO insecure_credentials VALUES (?, ?, 0, ?)', [(1, 0, 0), (2, 0, 0), (3, 0, 1), (1, 1, 0), (4, 2, 0)]); con.commit(); con.close()
+        with mock.patch.object(browsers, 'chromium_profiles', return_value=[('Chrome', str(prof))]), mock.patch.object(browsers, 'FIREFOX', []):
+            r = [(t, s) for t, s, _ in browsers.protection()]
+        self.assertEqual(r, [('Chrome: 2 saved passwords were found in a data breach', WARN), ('Chrome: 1 saved password was entered on a phishing site', ALERT)])
 
     def test_firefox_prefs(self):
         prof = self.d / 'ab12.default-release'; prof.mkdir()

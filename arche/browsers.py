@@ -59,6 +59,11 @@ def protection():
             yield warn(f'{label(name, prof)}: {what} are protected only by a built-in key',
                        fix='Start the browser with --password-store=kwallet6 (KDE) or gnome-libsecret so the keyring protects them '
                            '(a Flatpak browser needs access to org.freedesktop.secrets), and keep passwords in a password manager.')
+        # Password Checkup's own findings, kept beside the passwords: 0 = in a data breach, 1 = typed into a phishing site
+        for t, k in copy_query(f'{prof}/Login Data', 'SELECT insecurity_type, count(*) FROM insecure_credentials '
+                                                     'WHERE is_muted = 0 AND insecurity_type IN (0, 1) GROUP BY 1'):
+            yield (warn, alert)[t](f'{label(name, prof)}: {k} saved password{"s were" if k > 1 else " was"} {("found in a data breach", "entered on a phishing site")[t]}',
+                                   fix='Change them now, and anywhere you reused them. Password Manager > Checkup lists them.')
     for prof in sorted({os.path.dirname(p) for r in FIREFOX for p in files(f'{r}/*/prefs.js')}):
         p, name = firefox_prefs(prof), f'Firefox ({os.path.basename(prof).partition(".")[2] or os.path.basename(prof)})'
         off = [k.split('.')[-2] for k in ('browser.safebrowsing.malware.enabled', 'browser.safebrowsing.phishing.enabled',
