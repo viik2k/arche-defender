@@ -79,6 +79,20 @@ class Packages(unittest.TestCase):
             Path(self.d, p).parent.mkdir(parents=True, exist_ok=True); Path(self.d, p).write_text('{}')
         self.assertEqual(list(deps.lockfiles(self.d)), [os.path.join(self.d, 'proj/package-lock.json')])
 
+    def test_installed_tools(self):
+        sp = Path(self.d, 'tools/mcp-x/lib/python3.12/site-packages')
+        for x in ('mcp_x-1.2.0.dist-info', 'httpx-0.27.0.dist-info', 'mine-0.1.dist-info'): (sp / x).mkdir(parents=True)
+        (sp / 'mine-0.1.dist-info/direct_url.json').write_text('{"url": "file:///src/mine"}')
+        self.assertEqual(sorted(deps.packages(str(sp))), [('PyPI', 'httpx', '0.27.0'), ('PyPI', 'mcp_x', '1.2.0')])
+        self.assertEqual(deps.tool(str(sp))[0], 'Python tool mcp-x')
+        v = Path(self.d, 'claude/versions'); v.mkdir(parents=True)
+        for x in ('2.1.9', '2.1.10', '2.1.10.tmp'): (v / x).write_text('')
+        self.assertEqual(list(deps.packages(str(v))), [('npm', '@anthropic-ai/claude-code', '2.1.10')])
+        npx = Path(self.d, '.npm/_npx/ab12/package-lock.json'); npx.parent.mkdir(parents=True)
+        npx.write_text(json.dumps({'packages': {'': {'dependencies': {'mcp-remote': '^0.1'}}}}))
+        self.assertEqual(deps.tool(str(npx))[0], 'npx mcp-remote')
+        self.assertEqual(deps.tool('/usr/local/lib/node_modules/.package-lock.json'), ('Global npm packages in /usr/local', 'npm update -g'))
+
 
 DET = {'GHSA-crit': {'sev': 'CRITICAL', 'summary': '', 'aliases': ['PYSEC-1']}, 'PYSEC-1': {'sev': '?', 'summary': '', 'aliases': ['GHSA-crit']},
        'GHSA-mod': {'sev': 'MODERATE', 'summary': '', 'aliases': []}, 'MAL-1': {'sev': '?', 'summary': '', 'aliases': []}, 'GONE': None}
@@ -97,21 +111,27 @@ class Rows(unittest.TestCase):
                           (WARN, '1 of your code projects pin dependencies with critical vulnerabilities')])
         self.assertIn('pillow 1 (critical, GHSA-crit), x 2 (moderate, GHSA-mod)', rows[0][2])
         self.assertIn('uv lock --upgrade', rows[0][2])
+        tools = {'/t/claude/versions': [['npm', '@anthropic-ai/claude-code', '1', ['GHSA-crit']]],
+                 '/usr/lib/node_modules/.package-lock.json': [['npm', 'y', '1', ['GHSA-mod']]]}
+        self.assertEqual([(s, t) for t, s, _ in deps.rows(tools, DET, set(tools))],
+                         [(WARN, 'Claude Code has critical vulnerabilities'), (INFO, 'Global npm packages in /usr has moderate vulnerabilities')])
 
 
 class Update(unittest.TestCase):
     def test_update_and_check(self):
         d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
         Path(d, 'proj').mkdir(); Path(d, 'proj/uv.lock').write_text(UV)
+        Path(d, 'claude/versions').mkdir(parents=True); Path(d, 'claude/versions/2.0.0').write_text('')
 
         def osv(path, body=None):
             if path == '/querybatch': return {'results': [{'vulns': [{'id': 'GHSA-crit'}]} for _ in body['queries']]}
             return {'database_specific': {'severity': 'CRITICAL'}, 'summary': 's'}
-        with mock.patch.object(deps, 'HOME', d), mock.patch.object(deps, 'DB', Path(d, 'deps.json')), mock.patch.object(deps, 'osv', osv):
-            self.assertIn('1 packages in 1 lockfiles; 1 have', deps.update())
-            self.assertEqual([s for _, s, _ in deps.dependencies()], [INFO, WARN])
+        with mock.patch.object(deps, 'HOME', d), mock.patch.object(deps, 'DB', Path(d, 'deps.json')), mock.patch.object(deps, 'osv', osv), \
+                mock.patch.object(deps, 'TOOLS', (f'{d}/claude/versions',)):
+            self.assertIn('2 packages in 2 lockfiles and tools; 2 have', deps.update())
+            self.assertEqual([s for _, s, _ in deps.dependencies()], [INFO, WARN, WARN])
             os.utime(Path(d, 'proj/uv.lock'), (1, 1))   # edited since the check: wait for the next deps-update
-            self.assertEqual(list(deps.dependencies()), [])
+            self.assertEqual([t for t, _, _ in deps.dependencies()], ['Claude Code has critical vulnerabilities'])
             with mock.patch.object(deps, 'osv', side_effect=OSError):
                 self.assertIn('Could not reach', deps.update())
 

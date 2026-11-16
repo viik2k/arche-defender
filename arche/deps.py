@@ -1,10 +1,11 @@
-# Vulnerable dependencies: the lockfiles of code projects in the home folder, checked against the OSV database
+# Vulnerable dependencies: the lockfiles of code projects in the home folder, and the developer and AI tools installed
+# with npm, npx, pnpm, uv, pipx and Claude Code's installer, checked against the OSV database
 # (osv.dev: GitHub, PyPI, RustSec and OpenSSF malicious-package advisories). Like intel-update, the network part is an
 # action the user runs (deps-update); the scan only reads its saved result.
 # Only packages from the public registries are sent, so private package names never leave the PC.
-import json, os, re, tomllib, urllib.request
+import glob, json, os, re, tomllib, urllib.request
 from concurrent.futures import ThreadPoolExecutor
-from .core import check, action, alert, warn, item, text, jsonf, write_private, STATE, HOME
+from .core import check, action, alert, warn, item, text, files, jsonf, write_private, STATE, HOME
 
 DB = STATE / 'deps.json'
 OSV = 'https://api.osv.dev/v1'
@@ -13,6 +14,12 @@ FIX = {'package-lock.json': 'npm audit fix', 'pnpm-lock.yaml': 'pnpm update', 'C
        'uv.lock': 'uv lock --upgrade', 'requirements.txt': 'raise the pinned versions'}
 RANK = {'CRITICAL': 0, 'HIGH': 1, 'MODERATE': 2, 'MEDIUM': 2, 'LOW': 3}   # unrated counts as moderate
 LEVEL = ('critical', 'high', 'moderate', 'low')
+# Installed tools: what npx ran (MCP servers), global npm/pnpm packages, uv/pipx tool environments, Claude Code itself.
+TOOLS = ('~/.npm/_npx/*/package-lock.json', '~/.npm-global/lib/node_modules/.package-lock.json',
+         '~/.nvm/versions/node/*/lib/node_modules/.package-lock.json', '/usr/lib/node_modules/.package-lock.json',
+         '/usr/local/lib/node_modules/.package-lock.json', '~/.local/share/pnpm/global/*/pnpm-lock.yaml',
+         '~/.local/share/uv/tools/*/lib/python3*/site-packages', '~/.local/share/pipx/venvs/*/lib/python3*/site-packages',
+         '~/.cache/uv/environments-v*/*/lib/python3*/site-packages', '~/.local/share/claude/versions')
 
 
 def lockfiles(root, depth=5):
@@ -23,10 +30,32 @@ def lockfiles(root, depth=5):
         yield from (os.path.join(d, n) for n in names if n in FIX)
 
 
+def tool(path):
+    """(name, how to update) of an installed-tools location from TOOLS."""
+    if '/.npm/_npx/' in path:
+        top = ', '.join((jsonf(path).get('packages') or {}).get('', {}).get('dependencies') or {}) or '?'
+        return f'npx {top}', f'Run it as {top}@latest, or clear the npx cache ({os.path.dirname(path).replace(HOME, "~")})'
+    if path.endswith('/claude/versions'): return 'Claude Code', 'claude update'
+    if path.endswith('pnpm-lock.yaml'): return 'Global pnpm packages', 'pnpm update -g'
+    if path.endswith('.package-lock.json'): return f'Global npm packages in {path.split("/lib/node_modules/")[0].replace(HOME, "~")}', 'npm update -g'
+    env = path.split('/lib/python')[0]
+    return f'Python tool {os.path.basename(env)}', ('uv cache clean' if '/environments-v' in env else 'uv tool upgrade --all, or pipx upgrade-all')
+
+
 def packages(path):
-    """(ecosystem, name, version) of the public-registry packages a lockfile pins."""
-    n, t = os.path.basename(path), text(path)
-    if n == 'package-lock.json':   # lockfileVersion 2 and 3; npm 6's v1 format is not read
+    """(ecosystem, name, version) of the public-registry packages a lockfile or tool location pins."""
+    n = os.path.basename(path)
+    if n == 'site-packages':   # ponytail: assumed to come from PyPI unless pip recorded a path or git source
+        for d in glob.glob(f'{path}/*.dist-info'):
+            if (m := re.match(r'(.+)-([^-]+)\.dist-info$', os.path.basename(d))) and not os.path.exists(f'{d}/direct_url.json'):
+                yield 'PyPI', m[1], m[2]
+        return
+    if n == 'versions':   # Claude Code's native installer: one binary per version, numbered like the npm package
+        vs = [x for x in os.listdir(path) if re.fullmatch(r'\d+(\.\d+)+', x)]
+        if vs: yield 'npm', '@anthropic-ai/claude-code', max(vs, key=lambda x: tuple(map(int, x.split('.'))))
+        return
+    t = text(path)
+    if n in ('package-lock.json', '.package-lock.json'):   # .package-lock.json: what npm 7+ records for global installs   # lockfileVersion 2 and 3; npm 6's v1 format is not read
         try: pk = json.loads(t).get('packages') or {}
         except ValueError: return
         for k, v in pk.items():
@@ -78,20 +107,21 @@ def detail(i):
 @action('deps-update', 'Check your code projects\' dependencies for known vulnerabilities and malicious packages '
                        '(sends public package names and versions to osv.dev)')
 def update():
-    locks = {p: sorted(set(packages(p))) for p in lockfiles(HOME)}
+    tools = set(files(*TOOLS))
+    locks = {p: sorted(set(packages(p))) for p in [*lockfiles(HOME), *tools]}
     locks = {p: v for p, v in locks.items() if v}
-    if not locks: return 'No npm, pnpm, Cargo, uv or requirements.txt lockfiles found in your home folder.'
+    if not locks: return 'No npm, pnpm, Cargo, uv or requirements.txt lockfiles or installed tools found.'
     try:
         hits = query({x for v in locks.values() for x in v})
         old = {k: v for k, v in jsonf(DB).get('details', {}).items() if not (v or {}).get('err')}   # advisories rarely change
         new = sorted({i for v in hits.values() for i in v} - old.keys())
         with ThreadPoolExecutor(16) as ex: det = old | dict(zip(new, ex.map(detail, new)))
     except (OSError, ValueError, KeyError) as e: return f'Could not reach the OSV database ({type(e).__name__}); nothing changed.'
-    db = {'details': det, 'lockfiles': {p: {'mtime': os.stat(p).st_mtime, 'vulns': [[*k, hits[k]] for k in v if k in hits]}
+    db = {'details': det, 'lockfiles': {p: {'mtime': os.stat(p).st_mtime, 'tool': p in tools, 'vulns': [[*k, hits[k]] for k in v if k in hits]}
                                         for p, v in locks.items()}}
     write_private(DB, json.dumps(db))
     n = sum(bool(l['vulns']) for l in db['lockfiles'].values())
-    return f'Checked {len({x for v in locks.values() for x in v})} packages in {len(locks)} lockfiles; {n} have known advisories. Run a scan to see them.'
+    return f'Checked {len({x for v in locks.values() for x in v})} packages in {len(locks)} lockfiles and tools; {n} have known advisories. Run a scan to see them.'
 
 
 def triage(vulns, det):
@@ -105,21 +135,25 @@ def triage(vulns, det):
     return bad, worst
 
 
-def rows(locks, det):
+def rows(locks, det, tools=frozenset()):
     """locks: {lockfile: [[ecosystem, name, version, ids]]}. One summary warning, so a developer's many projects
-    do not swamp the score; each lockfile is an item with what to update."""
+    do not swamp the score; each lockfile is an item with what to update. Installed tools run on this PC, so a
+    critical or high advisory in one is its own warning."""
     crit = 0
     for path, vulns in locks.items():
-        where, fix = path.replace(HOME, '~'), FIX.get(os.path.basename(path), 'update them')
+        where, fix = tool(path) if path in tools else (path.replace(HOME, '~'), FIX.get(os.path.basename(path), 'update them'))
         bad, worst = triage(vulns, det)
         for b in bad: yield alert(f'{where} pins {b}, a known malicious package',
                                   fix='Remove it and reinstall from a clean lockfile. Install scripts may already have run, so change the passwords and tokens this PC holds.')
         if not worst: continue
         top = sorted(worst, key=lambda k: (worst[k][0], k))
-        crit += worst[top[0]][0] == 0
-        yield item(f'{where}: dependencies with {LEVEL[worst[top[0]][0]]} vulnerabilities',
-                   fix=f'Update them ({fix}), then run deps-update again: ' + ', '.join(f'{k} ({LEVEL[worst[k][0]]}, {worst[k][1][0]})' for k in top[:5]) +
-                       (f' and {len(top) - 5} more' if len(top) > 5 else '') + '. Details on osv.dev.')
+        r, what = worst[top[0]][0], ', '.join(f'{k} ({LEVEL[worst[k][0]]}, {worst[k][1][0]})' for k in top[:5]) + \
+            (f' and {len(top) - 5} more' if len(top) > 5 else '') + '. Details on osv.dev.'
+        if path in tools:
+            yield (warn if r <= 1 else item)(f'{where} has {LEVEL[r]} vulnerabilities', fix=f'Update it ({fix}), then run deps-update again: {what}')
+            continue
+        crit += r == 0
+        yield item(f'{where}: dependencies with {LEVEL[r]} vulnerabilities', fix=f'Update them ({fix}), then run deps-update again: {what}')
     if crit: yield warn(f'{crit} of your code projects pin dependencies with critical vulnerabilities',
                         fix='Each lockfile is listed in this check with what to update. They matter most for projects you run as servers or ship to others.')
 
@@ -134,4 +168,5 @@ def dependencies():
     def current(p, l):
         try: return os.stat(p).st_mtime == l['mtime']   # ponytail: a lockfile changed since the check waits for the next deps-update
         except OSError: return False
-    yield from rows({p: l['vulns'] for p, l in db.get('lockfiles', {}).items() if current(p, l)}, db.get('details', {}))
+    locks = {p: l for p, l in db.get('lockfiles', {}).items() if current(p, l)}
+    yield from rows({p: l['vulns'] for p, l in locks.items()}, db.get('details', {}), {p for p, l in locks.items() if l.get('tool')})
