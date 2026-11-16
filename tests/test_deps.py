@@ -1,0 +1,119 @@
+import os, sys
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
+import json, shutil, tempfile, unittest
+from pathlib import Path
+from unittest import mock
+from arche import deps
+from arche.core import ALERT, WARN, INFO
+
+NPM = {'lockfileVersion': 3, 'packages': {
+    '': {'name': 'mine'}, 'packages/local': {'version': '1.0.0'},
+    'node_modules/lodash': {'version': '4.17.20', 'resolved': 'https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz'},
+    'node_modules/a/node_modules/@s/b': {'version': '2.0.0', 'resolved': 'https://registry.npmjs.org/@s/b/-/b-2.0.0.tgz'},
+    'node_modules/alias': {'name': 'real', 'version': '1.0.0', 'resolved': 'https://registry.npmjs.org/real/-/real-1.0.0.tgz'},
+    'node_modules/private': {'version': '1.0.0', 'resolved': 'https://npm.corp.example/private-1.0.0.tgz'},
+    'node_modules/linked': {'resolved': 'packages/local', 'link': True}}}
+PNPM = """lockfileVersion: '9.0'
+
+importers:
+  .:
+    dependencies:
+      lodash:
+        specifier: ^4
+        version: 4.17.20
+
+packages:
+
+  '@babel/core@7.24.0':
+    resolution: {integrity: sha512-x}
+
+  lodash@4.17.20:
+    resolution: {integrity: sha512-y}
+
+  mine@file:../mine:
+    resolution: {directory: ../mine}
+
+snapshots:
+
+  notapackage@9.9.9: {}
+"""
+CARGO = """[[package]]
+name = "serde"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "my-app"
+version = "0.1.0"
+"""
+UV = """[[package]]
+name = "pillow"
+version = "12.3.0"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "mine"
+version = "0.1.0"
+source = { editable = "." }
+"""
+
+
+class Packages(unittest.TestCase):
+    def setUp(self): self.d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, self.d)
+
+    def parse(self, name, body):
+        Path(self.d, name).write_text(body)
+        return sorted(deps.packages(os.path.join(self.d, name)))
+
+    def test_public_registries_only(self):
+        self.assertEqual(self.parse('package-lock.json', json.dumps(NPM)), [('npm', '@s/b', '2.0.0'), ('npm', 'lodash', '4.17.20'), ('npm', 'real', '1.0.0')])
+        self.assertEqual(self.parse('pnpm-lock.yaml', PNPM), [('npm', '@babel/core', '7.24.0'), ('npm', 'lodash', '4.17.20')])
+        self.assertEqual(self.parse('Cargo.lock', CARGO), [('crates.io', 'serde', '1.0.0')])
+        self.assertEqual(self.parse('uv.lock', UV), [('PyPI', 'pillow', '12.3.0')])
+        self.assertEqual(self.parse('requirements.txt', 'Django==4.2.1\nrequests[socks] == 2.31.0 ; python_version>"3"\nflask>=2\n-e .\n'),
+                         [('PyPI', 'Django', '4.2.1'), ('PyPI', 'requests', '2.31.0')])
+        self.assertEqual(self.parse('requirements.txt', '--index-url https://pypi.corp.example/simple\nsecret==1.0\n'), [])
+
+    def test_lockfiles_skip_dependency_trees(self):
+        for p in ('proj/package-lock.json', 'proj/node_modules/x/package-lock.json', '.hidden/Cargo.lock', 'proj/target/Cargo.lock'):
+            Path(self.d, p).parent.mkdir(parents=True, exist_ok=True); Path(self.d, p).write_text('{}')
+        self.assertEqual(list(deps.lockfiles(self.d)), [os.path.join(self.d, 'proj/package-lock.json')])
+
+
+DET = {'GHSA-crit': {'sev': 'CRITICAL', 'summary': '', 'aliases': ['PYSEC-1']}, 'PYSEC-1': {'sev': '?', 'summary': '', 'aliases': ['GHSA-crit']},
+       'GHSA-mod': {'sev': 'MODERATE', 'summary': '', 'aliases': []}, 'MAL-1': {'sev': '?', 'summary': '', 'aliases': []}, 'GONE': None}
+
+
+class Rows(unittest.TestCase):
+    def test_rows(self):
+        locks = {'/p/a/uv.lock': [['PyPI', 'pillow', '1', ['GHSA-crit', 'PYSEC-1']], ['PyPI', 'x', '2', ['GHSA-mod', 'GONE']]],
+                 '/p/b/package-lock.json': [['npm', 'evil', '1.0.0', ['MAL-1']], ['npm', 'y', '1', ['GHSA-mod']]],
+                 '/p/c/Cargo.lock': [['crates.io', 'z', '1', ['GONE']]]}
+        rows = list(deps.rows(locks, DET))
+        self.assertEqual([(s, t) for t, s, _ in rows],
+                         [(INFO, '/p/a/uv.lock: dependencies with critical vulnerabilities'),
+                          (ALERT, '/p/b/package-lock.json pins evil 1.0.0 (npm), a known malicious package'),
+                          (INFO, '/p/b/package-lock.json: dependencies with moderate vulnerabilities'),
+                          (WARN, '1 of your code projects pin dependencies with critical vulnerabilities')])
+        self.assertIn('pillow 1 (critical, GHSA-crit), x 2 (moderate, GHSA-mod)', rows[0][2])
+        self.assertIn('uv lock --upgrade', rows[0][2])
+
+
+class Update(unittest.TestCase):
+    def test_update_and_check(self):
+        d = tempfile.mkdtemp(); self.addCleanup(shutil.rmtree, d)
+        Path(d, 'proj').mkdir(); Path(d, 'proj/uv.lock').write_text(UV)
+
+        def osv(path, body=None):
+            if path == '/querybatch': return {'results': [{'vulns': [{'id': 'GHSA-crit'}]} for _ in body['queries']]}
+            return {'database_specific': {'severity': 'CRITICAL'}, 'summary': 's'}
+        with mock.patch.object(deps, 'HOME', d), mock.patch.object(deps, 'DB', Path(d, 'deps.json')), mock.patch.object(deps, 'osv', osv):
+            self.assertIn('1 packages in 1 lockfiles; 1 have', deps.update())
+            self.assertEqual([s for _, s, _ in deps.dependencies()], [INFO, WARN])
+            os.utime(Path(d, 'proj/uv.lock'), (1, 1))   # edited since the check: wait for the next deps-update
+            self.assertEqual(list(deps.dependencies()), [])
+            with mock.patch.object(deps, 'osv', side_effect=OSError):
+                self.assertIn('Could not reach', deps.update())
+
+
+if __name__ == '__main__': unittest.main()

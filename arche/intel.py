@@ -37,7 +37,7 @@ def auth_key(): return (os.environ.get('ABUSECH_AUTH_KEY') or text(KEYFILE)).str
 def _slug(name): return re.sub(r'\W+', '-', name.lower()).strip('-') + '.txt'
 
 
-@action('intel-update', 'Download the threat intel feeds (the only time Arche Defender uses the network)')
+@action('intel-update', 'Download the threat intel feeds (scans themselves never use the internet)')
 def update():
     got, failed, key = [], [], auth_key()
     feeds = {**FEEDS, **({n: (u.format(key=urllib.request.quote(key, safe='')), k) for n, (u, k) in KEYED.items()} if key else {})}

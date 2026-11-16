@@ -55,7 +55,7 @@ Every complete scan's score is kept, so the Overview shows whether the machine i
 | Browsers | Safe Browsing switched off (Chromium family and Firefox), saved passwords protected only by Chromium's built-in key, Firefox proxies, managed browser policies that force extensions, proxies, search engines or certificates (how adware persists) |
 | Privacy | what is using the camera, microphone or screen right now; Flatpak apps allowed outside their sandbox; camera, location, screenshot and remote-control grants the desktop portals remember (remote control of mouse and keyboard without asking is a warning); passwords, tokens and keys left in shell and REPL history files (counted, never shown); password-manager exports, private keys, card numbers and wallet recovery phrases saved as plain files in Desktop, Documents and Downloads (only the kind is shown) |
 | Devices | USB and Thunderbolt devices (a new "keyboard" can be a BadUSB), paired Bluetooth devices and KDE Connect phones |
-| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations; every package source (dnf repos, apt sources, Flatpak remotes) and any that skip signature or TLS checks |
+| Updates | OS end of support, pending security updates, reboot needed, Flatpak and firmware updates, CPU vulnerability mitigations; every package source (dnf repos, apt sources, Flatpak remotes) and any that skip signature or TLS checks; known-vulnerable and malicious dependencies pinned in your code projects' lockfiles (npm, pnpm, Cargo, uv, requirements.txt), from the last `deps-update` |
 
 Without root it cannot see other users' processes, `/root`, sudoers or the sshd config; those checks say so.
 
@@ -81,6 +81,7 @@ Also in the window's **Tools** menu.
 | Action | Does |
 |---|---|
 | `intel-update` | downloads the threat-intel feeds; scans themselves never use the internet (the full-scan UPnP check only talks to your router) |
+| `deps-update` | checks the lockfiles of the code projects in your home folder against the OSV database (osv.dev: GitHub, PyPI, RustSec and OpenSSF malicious-package advisories); only packages from the public registries are sent, never private package names |
 | `password-check` | tells you whether a password is in known data breaches (Have I Been Pwned range API: only the first 5 characters of its SHA-1 are sent) |
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |

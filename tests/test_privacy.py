@@ -75,7 +75,7 @@ if __name__ == '__main__':
 class History(unittest.TestCase):
     def test_secrets(self):
         bad = ['sshpass -p hunter22 ssh pi@nas', 'mysql -u root -pS3cretPass db', 'curl -u admin:letmein123 http://x',
-               'git clone https://bob:ghp_abcdefghijklmnopqrstuvwxyz0123456789@github.com/x/y', 'export DB_PASSWORD="correcthorse"',
+               'git clone https://bob:ghp_R8kq2LmZ7vTnW4xYp9sJ3hB6cD1fG5aE0uQi@github.com/x/y', 'export DB_PASSWORD="correcthorse"',
                ': 1700000000:0;docker login --password Tr0ub4dor reg', 'echo hunter22 | sudo -S dnf install x', 'AKIAABCDEFGHIJKLMNOP']
         ok = ['mysql -u root -p mydb', 'docker login --password-stdin', 'export API_KEY=$(secret-tool lookup x y)',
               'export TOKEN=CHANGEME', 'docker run -u 1000:1000 img', 'curl -u "$USER:$PASS" x', 'git push', 'export TOKEN=<your-token>']
