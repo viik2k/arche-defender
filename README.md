@@ -23,11 +23,9 @@ plain Linux.
 ./arche-defender.py --version
 ```
 
-Add it to the app menu:
-
-```sh
-printf '[Desktop Entry]\nType=Application\nName=Arche Defender\nExec=%s/arche-defender.py\nIcon=security-high\nCategories=System;Security;\nStartupWMClass=Arche-defender\n' "$PWD" > ~/.local/share/applications/arche-defender.desktop
-```
+Nothing to install: run it from the checkout. To get an `arche-defender` command instead, `pipx install .` from the
+checkout (tkinter comes from your distro: `python3-tkinter` on Fedora, `python3-tk` on Debian/Ubuntu, `tk` on Arch).
+Add it to the app menu with `./arche-defender.py install-desktop`.
 
 On the first run nothing is marked new because there is no baseline. Read through the findings, then click
 **Accept as baseline** (or `--scan --accept`). Later scans mark anything that appeared since in amber.
@@ -84,6 +82,7 @@ Also in the window's **Tools** menu.
 | `quarantine PATH` / `restore ID` / `quarantined` | moves a file into a locked folder and back |
 | `canary-install` / `canary-remove` | puts a decoy PDF in Documents and Pictures; a scan (and the monitor) alarms if anything changes or renames it |
 | `install-monitor` / `uninstall-monitor` / `monitor-status` | the background monitor |
+| `install-desktop` | adds it to the app menu |
 | `ignore "Check: text"` / `unignore "Check: text"` / `ignored` | hide one finding for good (in the window: right-click it), show it again, list them |
 | `history` | the score of the last 20 complete scans |
 
@@ -106,7 +105,8 @@ and detected API keys are reported by type and file, never by value.
 ## Development
 
 ```
-arche-defender.py   launcher
+arche-defender.py   launcher (same as python3 -m arche)
+pyproject.toml      for pipx install; no dependencies
 arche/core.py       check/action registry, baseline, scoring, helpers
 arche/cli.py        arguments, headless scan, self-test
 arche/gui.py        tkinter window (scans on worker threads)

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arche-defender"
+dynamic = ["version"]
+description = "Open-source security suite for Linux desktops: malware, hardening, persistence, threat intel, privacy and AI-agent scanning"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+classifiers = ["Operating System :: POSIX :: Linux", "Topic :: Security", "Environment :: X11 Applications"]
+
+[project.scripts]
+arche-defender = "arche.cli:main"
+
+[tool.setuptools]
+packages = ["arche"]
+
+[tool.setuptools.dynamic]
+version = {attr = "arche.__version__"}

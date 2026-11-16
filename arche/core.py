@@ -42,7 +42,7 @@ def load_all():
     """Import every check module in the package, in filename order."""
     pkg = Path(__file__).parent
     for m in sorted(m.name for m in pkgutil.iter_modules([str(pkg)])):
-        if m not in ('core', 'cli', 'gui', 'report'): importlib.import_module(f'{__package__}.{m}')
+        if m not in ('core', 'cli', 'gui', 'report', '__main__'): importlib.import_module(f'{__package__}.{m}')
     return CHECKS
 
 

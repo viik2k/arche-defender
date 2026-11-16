@@ -7,7 +7,7 @@ from .core import STATE, ALERT, action, jsonf, write_private, sh, have, load_bas
 
 UNITS = Path(os.environ.get('XDG_CONFIG_HOME') or Path.home() / '.config') / 'systemd/user'
 SEEN = STATE / 'notified.json'
-LAUNCHER = Path(__file__).resolve().parent.parent / 'arche-defender.py'
+LAUNCHER = Path(__file__).resolve().parent / '__main__.py'   # works from a git checkout and from a pipx install
 WEEK = 7 * 86400
 # Folders watched for changes, and the checks a change re-runs: near-real-time download and persistence scanning, no daemon.
 WATCH = {'%h/Downloads': 'Dropped files', '%h/Desktop': 'Dropped files', '%h/.local/bin': 'Dropped files',
@@ -93,6 +93,22 @@ WantedBy=default.target
     on = sh('systemctl', '--user', 'is-active', 'arche-defender.timer').strip() == 'active'
     return (f'Background monitor on: an hourly scan, and Downloads, Desktop, ~/.local/bin and autostart are watched. '
             f'Turn off with: arche-defender uninstall-monitor' if on else f'Could not start the timer: {out or "is systemd --user running?"}')
+
+
+@action('install-desktop', 'add Arche Defender to the app menu')
+def desktop():
+    p = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local/share') / 'applications/arche-defender.desktop'
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f'''[Desktop Entry]
+Type=Application
+Name=Arche Defender
+Comment=Security scan for this PC
+Exec="{sys.executable}" "{LAUNCHER}"
+Icon=security-high
+Categories=System;Security;
+StartupWMClass=Arche-defender
+''')
+    return f'Added to the app menu: {p} (delete that file to remove it)'
 
 
 @action('uninstall-monitor', 'stop the background monitor')
