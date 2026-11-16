@@ -1,7 +1,7 @@
 # Persistence and tampering sweep: the places malware hides to survive a reboot, plus what is exposed right now.
 import glob, json, os, re
 from pathlib import Path
-from .core import HOME, PKG, alert, item, ver, sh, have, text, lines, files, jsonf, check, owned
+from .core import HOME, PKG, alert, warn, item, ver, sh, have, text, lines, files, jsonf, check, owned
 
 SENSITIVE = 'sudo|su|ssh|pkexec|passwd|doas|run0'
 RC_FILES = ('~/.bashrc', '~/.bash_profile', '~/.bash_login', '~/.profile', '~/.zshrc', '~/.zprofile', '~/.bashrc.d/*',
@@ -9,7 +9,16 @@ RC_FILES = ('~/.bashrc', '~/.bash_profile', '~/.bash_login', '~/.profile', '~/.z
             '~/.config/fish/config.fish', '~/.config/fish/conf.d/*.fish', '~/.config/environment.d/*.conf', '/etc/environment')
 APPS = ('/usr/share/applications', '/usr/local/share/applications', '/var/lib/flatpak/exports/share/applications',
         '~/.local/share/flatpak/exports/share/applications')
-GIT_RUNS = re.compile(r'^(core\.(sshcommand|hookspath|pager|askpass)|filter\..+\.(clean|smudge|process))$')
+GIT_RUNS = re.compile(r'^(core\.(sshcommand|hookspath|pager|askpass)|filter\..+\.(clean|smudge|process)|diff\..+\.(textconv|command)|'
+                      r'merge\..+\.driver|gpg(\.\w+)?\.program)$')
+OFF = ('true', 'false', 'yes', 'no', 'on', 'off', '1', '0', '')
+
+
+def git_runs(listing):
+    """(key, value) for each line of `git config -l` that makes git run a command (Git LFS's own filter left out)."""
+    for k, v in re.findall(r'^([^=\n]+)=(.*)$', listing, re.M):
+        if (GIT_RUNS.match(k) and not v.startswith(('git-lfs ', 'git lfs '))) or (k == 'core.fsmonitor' and v.lower() not in OFF) or (
+                k.startswith('alias.') or k.endswith('.helper')) and v.startswith('!'): yield k, v
 
 
 @check('Running programs', 'Processes')
@@ -125,17 +134,26 @@ def field(f, k): return next(iter(re.findall(rf'^{k}=(.*)$', text(f), re.M)), ''
 def hooks():
     """Lesser-known places that run a command for you: D-Bus activation, git, the SSH client, file-manager menus,
     Python start-up and app launchers that replace the system's own."""
-    from .ai import redact   # git and ssh values can hold tokens
+    from .ai import redact, repos, scan_text, tilde   # git and ssh values can hold tokens
     sysbus = {field(f, 'Name') for f in files('/usr/share/dbus-1/services/*.service')}
     for f in files('~/.local/share/dbus-1/services/*.service'):
         if field(f, 'Name') in sysbus: yield alert(f'{f} takes over the system D-Bus service {field(f, "Name")}: {field(f, "Exec")}',
                                                    f'Inspect it, then delete {f}')
         else: yield item(f'D-Bus service: {f} -> {field(f, "Exec")}')
     for scope in ('--system', '--global') if have('git') else ():
-        for k, v in re.findall(r'^([^=\n]+)=(.*)$', sh('git', 'config', scope, '--includes', '-l'), re.M):
-            if GIT_RUNS.match(k) or (k == 'core.fsmonitor' and v.lower() not in ('true', 'false')) or (
-                    k.startswith('alias.') or k.endswith('.helper')) and v.startswith('!'):
-                yield item(f'git {scope[2:]} {k}: {redact(v)[:150]}')
+        for k, v in git_runs(sh('git', 'config', scope, '--includes', '-l')): yield item(f'git {scope[2:]} {k}: {redact(v)[:150]}')
+    # A repo's own .git folder is not cloned, but one unpacked from a zip or tarball brings it along: its fsmonitor runs on every
+    # `git status`, which shell prompts, editors and AI agents run by themselves the moment you open the folder.
+    for r in repos() if have('git') else ():
+        for k, v in git_runs(sh('git', 'config', '--file', f'{r}/.git/config', '--includes', '-l')):
+            if k == 'core.fsmonitor' and not v.startswith('.git/hooks/'):
+                yield warn(f'{tilde(r)} runs a command each time git status runs there (shell prompts, editors and AI agents do that '
+                           f'on their own): {redact(v)[:120]}', f'If you did not set it: git -C {tilde(r)} config --unset core.fsmonitor')
+            else: yield item(f'git {tilde(r)} {k}: {redact(v)[:150]}')
+        for h in files(f'{r}/.git/hooks/*'):
+            if not h.endswith('.sample') and os.access(h, os.X_OK):
+                yield item(f'Git hook: {tilde(h)}')
+                yield from ((t, sev, f'Read it; if you did not add it, delete {tilde(h)}') for t, sev, _ in scan_text(text(h), f'git hook {tilde(h)}'))
     for f in files('~/.ssh/config', '~/.ssh/config.d/*', '/etc/ssh/ssh_config', '/etc/ssh/ssh_config.d/*'):
         for l in lines(text(f)):
             if re.match(r'(?i)(ProxyCommand|LocalCommand|KnownHostsCommand)\b|Match\s.*\bexec\b', l): yield item(f'{f}: {redact(l)[:150]}')
