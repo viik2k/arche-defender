@@ -60,6 +60,7 @@ MCP_FILES = ('~/.claude.json', '~/.config/Claude/claude_desktop_config.json', '~
              '~/.config/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json', '~/.continue/config.json',
              '~/.config/opencode/opencode.json', '~/.kiro/settings/mcp.json', '~/.aws/amazonq/mcp.json', '~/.lmstudio/mcp.json',
              '~/.config/zed/settings.json')
+CLAUDE_EXT = '~/.config/Claude/Claude Extensions'
 SKILL_DIRS = ('~/.claude/skills', '~/.claude/commands', '~/.claude/agents', '~/.agents/skills', '~/.codex/skills', '~/.codex/prompts',
               '~/.gemini/extensions', '~/.gemini/commands', '~/.config/opencode/agent', '~/.config/opencode/command', '~/.cursor/rules')
 INSTRUCTION_FILES = ('CLAUDE.md', 'AGENTS.md', 'GEMINI.md', '.cursorrules', '.windsurfrules', '.clinerules', '.github/copilot-instructions.md')
@@ -177,6 +178,7 @@ def contents():
         if '/temp_git_' not in d: yield from scan_tree(d, 'plugin')
     for root in SKILL_DIRS:
         if os.path.isdir(os.path.expanduser(root)): yield from scan_tree(os.path.expanduser(root), 'skill')
+    for d in files(f'{CLAUDE_EXT}/*'): yield from scan_tree(d, 'Claude Desktop extension')
 
 
 @check('AI agent permissions', FAM)
@@ -265,6 +267,9 @@ def mcp():
             w = where + (f' > {path[-1]}' if path and path[-1] not in ('mcp',) and where.endswith('.claude.json') else '')
             yield from judge_server(name, s, tilde(w))
             if unpinned(s): loose.append(name)
+    for mf in files(f'{CLAUDE_EXT}/*/manifest.json'):   # .mcpb/.dxt bundles: MCP servers that run unsandboxed
+        j = jsonf(mf); cfg = (j.get('server') or {}).get('mcp_config') or {}
+        yield from judge_server(j.get('display_name') or j.get('name') or Path(mf).parent.name, cfg, 'Claude Desktop extension')
     codex = text(f'{HOME}/.codex/config.toml')
     for name, body in re.findall(r'^\[mcp_servers\.([^\]]+)\]\n((?:[^\[].*\n?)*)', codex, re.M):
         cmd = re.search(r'^command\s*=\s*"([^"]*)"', body, re.M)
