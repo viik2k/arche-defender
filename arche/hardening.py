@@ -53,6 +53,8 @@ def security():
 @check('Firewall rules', 'Protection')
 def firewall():
     if not have('firewall-cmd'): return
+    from .exposure import public_v6   # firewalld zones cover IPv6 too, and an internet IPv6 address has no NAT in front of it
+    v6 = ', and from the internet over IPv6 unless your router blocks it' if public_v6(sh('ip', '-6', '-o', 'addr', 'show', 'scope', 'global')) else ''
     zones = re.findall(r'^(\S+)[^\n]*\n\s+interfaces: (.*)$', sh('firewall-cmd', '--get-active-zones'), re.M)
     for zone, ifs in zones:
         ifs = [i for i in ifs.split() if not INFRA_IF.match(i)]
@@ -64,7 +66,7 @@ def firewall():
         for p in conf.get('ports', '').split():
             m = re.match(r'(\d+)-(\d+)/', p)
             if m and int(m[2]) - int(m[1]) > 1000:
-                yield warn(f'Zone {zone} opens ports {p} to your network: any app that listens is reachable',
+                yield warn(f'Zone {zone} opens ports {p} to your network{v6}: any app that listens is reachable',
                            f'sudo firewall-cmd --permanent --zone={zone} --remove-port={p} && sudo firewall-cmd --reload '
                            '(then add back only the ports you use)')
             else: yield item(f'Zone {zone} allows port: {p}')

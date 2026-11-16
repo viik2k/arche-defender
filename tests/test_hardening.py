@@ -21,5 +21,18 @@ def test_ssh_client_rows():
     assert [s for _, s, _ in ssh_client_rows('Host *\n    UserKnownHostsFile "/dev/null"\n', 'cfg')] == [1]
 
 
+def test_firewall_v6():
+    import arche.hardening as h
+    real = h.sh, h.have
+    out = {'--get-active-zones': 'FedoraWorkstation (default)\n  interfaces: eno1\n',
+           '--zone=FedoraWorkstation': '  target: default\n  services: ssh\n  ports: 1025-65535/tcp 1025-65535/udp\n'}
+    for addr, tail in (('2403:5800:1::7', ', and from the internet over IPv6 unless your router blocks it'), ('fd00::7', '')):
+        h.have, h.sh = (lambda c: True), lambda *a, **k: out.get(a[1], '') if a[0] == 'firewall-cmd' else f'2: eno1 inet6 {addr}/64 scope global'
+        try: rows = [t for t, s, _ in h.firewall() if s == 1]
+        finally: h.sh, h.have = real
+        assert rows == [f'Zone FedoraWorkstation opens ports {p} to your network{tail}: any app that listens is reachable'
+                        for p in ('1025-65535/tcp', '1025-65535/udp')], rows
+
+
 if __name__ == '__main__':
-    test_plain_swap(); test_ssh_client_rows(); print('ok')
+    test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')
