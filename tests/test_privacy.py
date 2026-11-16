@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import shutil, tempfile, unittest
+import base64, shutil, tempfile, unittest
 from unittest import mock
 from pathlib import Path
 from arche import privacy
@@ -154,6 +154,26 @@ class Sensitive(unittest.TestCase):
         self.assertEqual(S('notes.txt', self.PHRASE), [])                               # no wallet context
         self.assertEqual(S('seed.txt', self.PHRASE + ' extra'), [])                     # 13 words
         self.assertEqual(S('seed.txt', 'the ' + self.PHRASE[8:]), [])                   # common English
+
+    def test_key_locked(self):
+        key = lambda cipher: '-----BEGIN OPENSSH PRIVATE KEY-----\n' + base64.b64encode(
+            b'openssh-key-v1\0' + len(cipher).to_bytes(4, 'big') + cipher + bytes(48)).decode() + '\n'
+        self.assertEqual(privacy.sensitive('k', key(b'none')), ['a private key'])
+        self.assertEqual(privacy.sensitive('k', key(b'aes256-ctr')), ['a private key (passphrase-protected)'])
+
+    def test_folders(self):
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d)
+        ssh = d / 'migration/dotfiles/.ssh'; ssh.mkdir(parents=True)   # a copy of ~/.ssh left behind
+        for n in ('id_rsa', 'id_ed25519'): (ssh / n).write_text('-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n')
+        (ssh / 'id_rsa.pub').write_text('ssh-rsa AAAA')
+        (d / 'migration/dotfiles/auth.json').write_text('{"token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyLTQyIiwiZXhwIjoxOTk5OTk5OTk5fQ.Qm9vdGgtdGhpcy1pcy1hLXRlc3Qtc2lnbmF0dXJl"}')
+        (d / 'Documents').mkdir(); (d / 'Documents/seed.txt').write_text(self.PHRASE)
+        (d / '.config').mkdir(); (d / '.config/k').write_text('-----BEGIN OPENSSH PRIVATE KEY-----\n')   # the apps' own folders
+        with mock.patch.object(privacy, 'HOME', str(d)):
+            r = sorted(t for t, _, _ in privacy.sensitive_files())
+        self.assertEqual(r, ['~/Documents/seed.txt holds a wallet recovery phrase in plain text',
+                             '~/migration/dotfiles/.ssh holds 2 plain-text files with secrets: private key',
+                             '~/migration/dotfiles/auth.json holds keys or tokens (JWT) in plain text'])
 
     def test_linear(self):
         import time

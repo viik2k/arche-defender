@@ -1,6 +1,6 @@
 # Privacy and devices: what can see or hear you right now, what sandboxed apps are allowed to touch,
 # and the hardware that is plugged in or paired (a new "keyboard" can be a BadUSB).
-import configparser, grp, json, os, re
+import base64, configparser, grp, json, os, re
 from .core import check, alert, warn, item, sh, have, text, files, HOME
 from .ai import secret_kinds
 from .browsers import copy_query
@@ -271,10 +271,18 @@ def sensitive(name, t):
        ('"encrypted": false' in head and '"login"' in t[:200000]):
         kinds.append('a password-manager export')
     if '-----BEGIN' in t and re.search(r'-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----', t):
-        kinds.append('a private key' + (' (passphrase-protected)' if 'ENCRYPTED' in t or 'Proc-Type: 4,ENCRYPTED' in t else ''))
+        kinds.append('a private key' + (' (passphrase-protected)' if key_locked(t) else ''))
     if CARD_WORDS.search(t) and any(luhn(re.sub(r'\D', '', m)) for m in CARD.findall(t)): kinds.append('card numbers')
     if (WALLET_WORDS.search(name) or WALLET_WORDS.search(t[:20000])) and recovery_phrase(t): kinds.append('a wallet recovery phrase')
     return kinds
+
+
+def key_locked(t):
+    """A PEM key marked ENCRYPTED, or an OpenSSH key whose cipher is not 'none' (its header never says ENCRYPTED)."""
+    if 'ENCRYPTED' in t: return True
+    m = re.search(r'-----BEGIN OPENSSH PRIVATE KEY-----\s*([A-Za-z0-9+/]{64})', t)   # magic, then the cipher name
+    try: return bool(m) and b'\0\0\0\4none' not in base64.b64decode(m[1])
+    except ValueError: return False
 
 
 def recovery_phrase(t):
@@ -291,10 +299,20 @@ def recovery_phrase(t):
 
 @check('Sensitive files', 'Privacy')
 def sensitive_files():
-    """Password exports, private keys, card numbers and wallet recovery phrases saved as plain text where infostealers look."""
-    for p, st in walk([f'{HOME}/{d}' for d in ('Desktop', 'Documents', 'Downloads')], 3):
+    """Password exports, private keys, tokens, card numbers and wallet recovery phrases saved as plain files in your folders,
+    where infostealers look: also copies of ~/.ssh and sign-in files left behind by a migration or backup."""
+    found = {}
+    roots = [f'{HOME}/{d}' for d in sorted(os.listdir(HOME)) if not d.startswith('.')]   # ponytail: dot folders are the apps' own
+    for p, st in walk([r for r in roots if os.path.isdir(r)], 3):
         if st.st_size > (1 << 20) or os.path.splitext(p)[1].lower() not in SENSITIVE_EXT: continue
-        if kinds := sensitive(os.path.basename(p), text(p)):
-            yield warn(f'{p.replace(HOME, "~")} holds {" and ".join(kinds)} in plain text',
-                       fix='Infostealers copy files like this first. Move it into your password manager or an encrypted vault '
-                           '(KeePassXC, Cryptomator), then delete it and empty the Trash. Encrypted keys are lower risk.')
+        t = text(p)
+        if kinds := sensitive(os.path.basename(p), t) + ([f'keys or tokens ({", ".join(s)})'] if (s := secret_kinds(t)) else []):
+            found.setdefault(os.path.dirname(p), []).append((p, kinds))
+    fix = ('Infostealers copy files like this first. Move it into your password manager or an encrypted vault (KeePassXC, '
+           'Cryptomator), then delete it and empty the Trash. A copy of a key or token works as well as the original: if you '
+           'cannot be sure where copies went, change it. Encrypted keys are lower risk.')
+    for d, hits in found.items():
+        if len(hits) == 1: yield warn(f'{hits[0][0].replace(HOME, "~")} holds {" and ".join(hits[0][1])} in plain text', fix=fix)
+        else:
+            kinds = sorted({re.sub(r'^an? ', '', k) for _, ks in hits for k in ks})
+            yield warn(f'{d.replace(HOME, "~")} holds {len(hits)} plain-text files with secrets: {", ".join(kinds)}', fix=fix)
