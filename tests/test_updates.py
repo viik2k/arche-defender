@@ -1,6 +1,8 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import unittest
+import shutil, tempfile, unittest
+from pathlib import Path
+from unittest import mock
 from arche import updates
 from arche.core import INFO, WARN
 
@@ -33,6 +35,26 @@ class Sources(unittest.TestCase):
         self.assertEqual(r, [('Package source: fedora (mirrors.fedoraproject.org)', INFO),
                              ('Packages from repo sketchy (repo.example) are installed without a signature check', WARN),
                              ('Repo plain is fetched over plain http (repo.example); its packages are still signature-checked', INFO)])
+
+
+
+class Electron(unittest.TestCase):
+    def test_apps_and_support(self):
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d)
+        app = d / 'flatpak/app/com.example.Chat/current/active/files/chat'; app.mkdir(parents=True); (app / 'icudtl.dat').touch()
+        exe = app / 'chat'
+        with open(exe, 'wb') as f: f.truncate(21 << 20); f.seek(12 << 20); f.write(b'Mozilla/5.0 Chrome/128.0.6613.36 Electron/32.3.0 Safari/537.36')
+        exe.chmod(0o755)
+        (d / 'chrome').mkdir(); (d / 'chrome/icudtl.dat').touch()   # a browser, not Electron
+        with mock.patch.object(updates, 'RUNTIMES', (f'{d}/chrome', f'{d}/flatpak/app/*/current/active/files/*')):
+            apps = list(updates.electron_apps())
+        self.assertEqual(apps, [('com.example.Chat', str(app), '32.3.0', 128)])
+        rel = [{'version': v} for v in ('47.0.0-nightly.20261113', '46.0.0-beta.3', '45.2.1', '44.10.2', '43.8.9', '43.0.0', '42.4.0')]
+        self.assertEqual(updates.supported_majors(rel), {43, 44, 45})
+        rows = list(updates.electron_rows(apps + [('code', '/usr/share/code', '43.8.6', 150)], rel))
+        self.assertEqual([(s, t) for t, s, _ in rows], [(WARN, 'com.example.Chat runs on Electron 32.3.0 (Chromium 128), which no longer gets security fixes'),
+                                                         (INFO, 'code bundles Electron 43 (Chromium 150)')])
+        self.assertEqual([s for _, s, _ in updates.electron_rows(apps, {})], [INFO])   # no release feed yet
 
 
 if __name__ == '__main__':

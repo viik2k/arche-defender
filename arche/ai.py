@@ -700,6 +700,67 @@ def chat_secrets():
         if len(hits) > 10: yield warn(f'{len(hits) - 10} more {app} conversations hold keys in plain text', tip)
 
 
+# What a prompt-injected agent does with its shell: send a key file, the environment or a browser's saved logins off the PC.
+NET_TOOL = re.compile(r'\b(curl|wget|nc|ncat|netcat|socat|scp|rsync|sftp|ftp|telnet|xh|https?|Invoke-WebRequest|iwr)\b')
+SECRET_PATH = re.compile(r'\.ssh/id_[\w-]+(?!\.pub)\b|\.aws/credentials|\.netrc\b|\.git-credentials|\.claude/\.credentials\.json|'
+                         r'\.codex/auth\.json|\.config/gh/hosts\.yml|\.kube/config|\.docker/config\.json|\.gnupg/|\.password-store|'
+                         r'(?<![\w.])\.env\b|wallet\.dat|Login Data|logins\.json|key4\.db|cookies\.sqlite')
+DROP_HOST = re.compile(r'webhook\.site|requestbin|pipedream\.net|interact\.sh|\.oast\.|burpcollaborator|ngrok(-free)?\.(io|app|dev)|'
+                       r'transfer\.sh|paste(bin\.com|\.ee)|hastebin|0x0\.st|discord(app)?\.com/api/webhooks|api\.telegram\.org/bot')
+SHELL_TOOLS = {'Bash', 'shell', 'exec_command', 'run_shell_command', 'local_shell', 'exec', 'bash', 'execute_command', 'terminal'}
+EXFIL_HINT = re.compile(rb'\.ssh/id_|credentials|\.netrc|\.env|\.gnupg|password-store|wallet\.dat|Login Data|logins\.json|key4\.db|'
+                        rb'cookies\.sqlite|printenv|env \||' + DROP_HOST.pattern.encode())
+
+
+def shell_commands(obj):
+    """Commands an agent ran, from a transcript entry: Claude Code tool_use, Codex function_call, Gemini functionCall, OpenClaw exec."""
+    if isinstance(obj, list):
+        for x in obj: yield from shell_commands(x)
+    if not isinstance(obj, dict): return
+    if obj.get('name') in SHELL_TOOLS or obj.get('type') == 'local_shell_call':
+        p = obj.get('input') or obj.get('args') or obj.get('arguments') or obj.get('action') or {}
+        if isinstance(p, str):
+            try: p = json.loads(p)
+            except ValueError: p = {'command': p}
+        c = (p.get('command') or p.get('cmd') or '') if isinstance(p, dict) else ''
+        if c: yield ' '.join(map(str, c)) if isinstance(c, list) else str(c)
+    for v in obj.values():
+        if isinstance(v, (dict, list)): yield from shell_commands(v)
+
+
+def exfil(cmd):
+    """What a shell command sends off the PC, or None. Judged per statement, so `cat x && curl y` is two."""
+    for st in re.split(r'\n|;|&&|\|\|', cmd):
+        if not NET_TOOL.search(st): continue
+        if m := SECRET_PATH.search(st): return m[0].strip('/')
+        if re.match(r'\s*(env|printenv)\b[^|]*\|', st): return 'your environment variables (API keys included)'
+        if m := DROP_HOST.search(st): return f'data to {m[0]} (a throwaway drop host)'
+
+
+@check('AI agent commands', FAM, slow=True)
+def agent_commands():
+    """Shell commands agents actually ran that send keys or the environment off the PC: what a prompt injection makes them do."""
+    seen, hits = set(), []
+    for app, pats, _ in CHATS:
+        if app not in ('Claude Code', 'Codex', 'Gemini CLI', 'OpenClaw'): continue   # ponytail: the apps whose tool calls are plain JSON
+        for f in files(*pats):
+            try:
+                with open(f, 'rb') as fh: rows = fh.read(256 << 20).splitlines() if f.endswith('.jsonl') else [fh.read(64 << 20)]
+            except OSError: continue
+            for row in rows:
+                if not EXFIL_HINT.search(row): continue
+                try: entry = json.loads(row)
+                except ValueError: continue
+                for c in shell_commands(entry):
+                    if (what := exfil(c)) and c not in seen:
+                        seen.add(c); hits.append((os.path.getmtime(f), app, f, what, c))
+    for _, app, f, what, c in sorted(hits, reverse=True)[:10]:
+        yield warn(f'{app} ran a command that sends {what} off this PC ({tilde(f)}): {redact(c)[:140]}',
+                   'If you did not ask for it, the agent was likely prompt-injected: rotate that secret, and read what the session '
+                   'opened just before (a web page, an issue, a file) to find the injection')
+    if len(hits) > 10: yield warn(f'{len(hits) - 10} more agent commands sent secrets off this PC')
+
+
 HF_HUB = os.path.join(os.environ.get('HF_HOME') or f'{HOME}/.cache/huggingface', 'hub')
 OLLAMA = ('~/.ollama/models', '/usr/share/ollama/.ollama/models', '/var/lib/ollama/.ollama/models')   # user install, then the system service's
 

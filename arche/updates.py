@@ -1,9 +1,11 @@
 # Updates and vulnerabilities: OS support end, pending (security) package updates, reboot-needed kernels,
-# Flatpak and firmware updates, fwupd's Host Security ID, and CPU vulnerability mitigations.
+# Flatpak and firmware updates, fwupd's Host Security ID, and CPU vulnerability mitigations;
+# apps that bundle a browser engine (Electron) too old to still get security fixes.
 # How long since the last update is hardening.py's 'Security posture'; this module covers what is still waiting.
-import configparser, json, os, re, time
+import configparser, json, mmap, os, re, time
 from datetime import date
-from .core import check, alert, warn, item, sh, have, text, files, HOME, UPGRADE as UPGRADE_CMD
+from .core import check, alert, warn, item, sh, have, text, files, jsonf, HOME, UPGRADE as UPGRADE_CMD
+from .intel import ELECTRON
 
 UPGRADE = f'Update with your desktop\'s updater or: {UPGRADE_CMD}'
 
@@ -142,3 +144,45 @@ def sources():
                 yield warn(f'Flatpak remote {m[1]} ({where}) installs apps without a signature check',
                            fix=f'Run: flatpak remote-modify {"--user " if where == "user" else ""}--gpg-verify {m[1]}  (or remove the remote)')
             else: yield item(f'Flatpak remote {m[1]} ({where}): {c[sec].get("url", "?")}')
+
+
+# Folders a Chromium runtime (marked by icudtl.dat) may sit in: packages, /opt, user installs, running AppImages, Flatpaks.
+RUNTIMES = ('/usr/lib/*', '/usr/lib64/*', '/usr/share/*', '/opt/*', '/opt/*/*', '~/.local/share/*', '~/Applications/*', '/tmp/.mount_*',
+            *(f'{r}/*/current/active/files{s}' for r in ('/var/lib/flatpak/app', '~/.local/share/flatpak/app') for s in ('', '/*')))
+UA = re.compile(rb'Chrome/(\d+)\.\d+\.\d+\.\d+ Electron/(\d+\.\d+\.\d+)')
+
+
+def electron_apps():
+    """(name, folder, Electron version, Chromium major) for each Electron app: its main program carries the user-agent string."""
+    for d in sorted({os.path.dirname(f) for f in files(*(f'{r}/icudtl.dat' for r in RUNTIMES))}):
+        try: exes = [e.path for e in os.scandir(d) if e.is_file(follow_symlinks=False) and e.stat().st_size > (20 << 20) and os.access(e.path, os.X_OK)]
+        except OSError: continue
+        for exe in exes:
+            try:
+                with open(exe, 'rb') as f, mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as m: ua = (u := UA.search(m)) and u.groups()
+            except (OSError, ValueError): continue
+            if ua:
+                fp = re.search(r'/flatpak/app/([^/]+)/', d)
+                yield (fp[1] if fp else os.path.basename(exe)), d, ua[1].decode(), int(ua[0]); break
+
+
+def supported_majors(releases):
+    """The Electron majors still patched: the newest three with a stable release."""
+    return set(sorted({int(r['version'].split('.')[0]) for r in releases if re.fullmatch(r'\d+\.\d+\.\d+', str(r.get('version', '')))})[-3:])
+
+
+def electron_rows(apps, releases):
+    ok = supported_majors(releases) if isinstance(releases, list) else set()
+    for name, d, ver, chrome in apps:
+        if ok and int(ver.split('.')[0]) not in ok:
+            yield warn(f'{name} runs on Electron {ver} (Chromium {chrome}), which no longer gets security fixes',
+                       fix=f'Update it (installed in {d.replace(HOME, "~")}). If it is already current, its makers ship an unsupported browser engine: '
+                           'avoid opening untrusted links, files or messages in it.')
+        else: yield item(f'{name} bundles Electron {ver.split(".")[0]} (Chromium {chrome})',   # ponytail: no patch level in the text, or every app update is "new"
+                         fix=f'Electron {ver} in {d.replace(HOME, "~")}.' + ('' if ok else ' Run intel-update to learn whether it still gets security fixes.'))
+
+
+@check('Built-in browser engines', 'Updates')
+def electron():
+    """Apps that bundle their own Chromium (Electron: VS Code, Discord, Obsidian...) are only as patched as the Electron they ship."""
+    yield from electron_rows(electron_apps(), jsonf(ELECTRON))

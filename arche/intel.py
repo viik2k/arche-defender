@@ -18,6 +18,7 @@ FEEDS = {
     'signature-base C2': ('https://raw.githubusercontent.com/Neo23x0/signature-base/master/iocs/c2-iocs.txt', 'mixed'),
     'signature-base hashes': ('https://raw.githubusercontent.com/Neo23x0/signature-base/master/iocs/hash-iocs.txt', 'hash'),
     'HaGeZi TIF': ('https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.mini-onlydomains.txt', 'domain'),
+    'Electron releases': ('https://releases.electronjs.org/releases.json', 'electron'),   # not indicators: updates.py reads it
 }
 KEYFILE = CUSTOM.parent / 'abusech.key'
 # Need a free abuse.ch Auth-Key (https://auth.abuse.ch/) in KEYFILE or $ABUSECH_AUTH_KEY; it goes in the URL path.
@@ -35,6 +36,9 @@ def auth_key(): return (os.environ.get('ABUSECH_AUTH_KEY') or text(KEYFILE)).str
 
 
 def _slug(name): return re.sub(r'\W+', '-', name.lower()).strip('-') + '.txt'
+
+
+ELECTRON = DIR / _slug('Electron releases')
 
 
 @action('intel-update', 'Download the threat intel feeds (scans themselves never use the internet)')
@@ -81,6 +85,7 @@ def _abusech(body, feed, out):
 
 def _parse(kind, body, feed, out):
     if kind == 'abusech': return _abusech(body, feed, out)
+    if kind == 'electron': return
     for raw in body.splitlines():
         l = raw.strip()
         if not l or l[0] in '#;!/': continue
