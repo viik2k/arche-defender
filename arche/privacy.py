@@ -239,25 +239,26 @@ def history():
 
 
 
-CLICKFIX_FIX = ('If you did not type it yourself, a web page probably told you to paste it (a fake CAPTCHA or "fix it" page, called ClickFix): '
+CLICKFIX_FIX = ('If you did not type or copy it yourself, a web page probably put it there for you to paste (a fake CAPTCHA or "fix it" page, called ClickFix): '
                 'run a full scan, check Startup entries and Scheduled tasks, and change your passwords from another device.')
 
 
-def history_rows(t, where):
-    """The malware rules over each history line: scripts piped straight from the internet listed by host, anything worse warned about."""
+def history_rows(t, where, did='ran a script'):
+    """The malware rules over each history line: scripts piped straight from the internet listed by host, payloads alerted on."""
     seen = set()
     for l in t.splitlines():
         for rule, sev, snip in match(l):
-            if rule != 'download piped into a shell':
-                row = (alert if sev == ALERT else warn)(f'{where}: {rule}: "{redact(snip)[:100]}"', fix=CLICKFIX_FIX)
+            if rule != 'download piped into a shell':   # the warning-level rules (adds an SSH key, a cron job) are everyday admin here
+                if sev != ALERT: continue
+                row = alert(f'{where}: {rule}: "{redact(snip)[:100]}"', fix=CLICKFIX_FIX)
             elif not (u := re.search(r'''https?://[^\s"'|;)]+''', snip)): continue   # ponytail: an address in a variable is not followed
             elif bad := link_signs(u[0])[0]:
-                row = alert(f'{where}: ran a script straight from {urllib.parse.urlsplit(u[0]).hostname}: {bad[0]}', fix=CLICKFIX_FIX)
+                row = alert(f'{where}: {did} straight from {urllib.parse.urlsplit(u[0]).hostname}: {bad[0]}', fix=CLICKFIX_FIX)
             else:
                 host = urllib.parse.urlsplit(u[0]).hostname or '?'
                 odd = 'from a bare IP address' if re.fullmatch(r'[\d.]+|[0-9a-f:]*:[0-9a-f:]*', host) else 'without encryption (http)' if u[0].startswith('http:') else ''
-                row = (warn(f'{where}: ran a script straight from {host} {odd}', fix=CLICKFIX_FIX) if odd else
-                       item(f'{where}: ran a script straight from {host}', fix='Installers piped into a shell run whatever that site serves; fine for sites you chose.'))
+                row = (warn(f'{where}: {did} straight from {host} {odd}', fix=CLICKFIX_FIX) if odd else
+                       item(f'{where}: {did} straight from {host}', fix='Installers piped into a shell run whatever that site serves; fine for sites you chose.'))
             if row[0] not in seen: seen.add(row[0]); yield row
 
 
@@ -298,6 +299,8 @@ def clipboard():
             yield warn(f'{CLIPBOARDS[f.replace(HOME, "~")]} keeps copied secrets on disk ({", ".join(kinds)})',
                        fix='Clear the clipboard history and turn off saving it between sessions in the clipboard settings, then change '
                            'those secrets. Password managers that mark copies as secret (KeePassXC) are left out of the history.')
+        t = '\n'.join(e for e in clip_entries(f) if isinstance(e, str))   # a ClickFix page copies its command for you
+        yield from (r for r in history_rows(t, CLIPBOARDS[f.replace(HOME, '~')], 'holds a command that runs a script') if r[1])
 
 
 # systemd-coredump logs a crashed program's environment to the journal and keeps its memory under /var/lib/systemd/coredump,

