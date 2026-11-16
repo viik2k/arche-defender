@@ -1,6 +1,6 @@
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))   # python3 tests/<file>.py
-import json, shutil, sqlite3, tempfile, unittest
+import base64, json, shutil, sqlite3, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 from arche import browsers
@@ -95,6 +95,20 @@ class Browsers(unittest.TestCase):
     def test_nss(self):
         with mock.patch.object(browsers, 'sh', return_value=CERTUTIL):
             self.assertEqual(browsers.nss_cas('/x'), ['Evil Root CA'])
+
+
+class Discord(unittest.TestCase):
+    def test_token(self):
+        uid = base64.urlsafe_b64encode(b'123456789012345678').rstrip(b'=')
+        fake = b'_https://discord.com\x00\x01token\x01"' + uid + b'.GhIjKl.' + b'a' * 38 + b'"'
+        self.assertTrue(browsers.discord_token(fake))
+        self.assertTrue(browsers.discord_token(b'"dQw4w9WgXcQ:djEwAAAA"'))
+        self.assertFalse(browsers.discord_token(b'"dQw4w9WgXcQ:djExAAAA"'))   # v11: under the keyring
+        self.assertFalse(browsers.discord_token(b'"' + base64.urlsafe_b64encode(b'not-a-user-id-xx') + b'.GhIjKl.' + b'a' * 38 + b'"'))
+        d = Path(tempfile.mkdtemp()); self.addCleanup(shutil.rmtree, d)
+        (d / 'Local Storage/leveldb').mkdir(parents=True); (d / 'Local Storage/leveldb/000005.ldb').write_bytes(fake)
+        with mock.patch.object(browsers, 'DISCORD', {str(d): 'Discord (Flatpak)'}):
+            self.assertEqual([(t, s) for t, s, _ in browsers.sign_ins()], [('Discord (Flatpak) keeps your sign-in token where any program can read it', INFO)])
 
 
 class CopyQuery(unittest.TestCase):

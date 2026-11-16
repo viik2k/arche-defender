@@ -3,7 +3,7 @@
 # certificates trusted beyond the OS bundle (an added root can read all HTTPS traffic).
 # Also browsers started with flags that hand over cookies or weaken HTTPS, and Firefox security prefs turned down.
 # Which extensions are installed is persistence.py's 'Browser extensions'; --no-sandbox is hardening.py's 'App sandboxes'.
-import json, os, re, shlex, shutil, sqlite3, tempfile
+import base64, json, os, re, shlex, shutil, sqlite3, tempfile
 from pathlib import Path
 from .core import check, alert, warn, item, sh, have, text, files, jsonf, HOME
 from .persistence import CHROMIUM, chromium_roots
@@ -195,6 +195,40 @@ def subject(pem):
 def nss_cas(db):
     """Nicknames of certificates an NSS database trusts as a CA for websites (trust flags with C in the SSL field)."""
     return [n.strip() for n, ssl in re.findall(r'^(.+?)\s{2,}([A-Za-z]*),[A-Za-z]*,[A-Za-z]*[ \t]*$', sh('certutil', '-L', '-d', f'sql:{db}', timeout=15), re.M) if 'C' in ssl]
+
+
+# Discord and its web wrappers: the account token sits in Local Storage. Discord marks encrypted ones dQw4w9WgXcQ:,
+# and djEw is base64 of v10, Chromium's built-in key. Unencrypted, it is "<base64 user id>.<time>.<hmac>".
+DISCORD = {'~/.config/discord': 'Discord', '~/.config/discordcanary': 'Discord Canary', '~/.config/discordptb': 'Discord PTB',
+           '~/.var/app/com.discordapp.Discord/config/discord': 'Discord (Flatpak)', '~/.config/vesktop': 'Vesktop',
+           '~/.var/app/dev.vencord.Vesktop/config/vesktop': 'Vesktop (Flatpak)', '~/.config/legcord': 'Legcord', '~/.config/WebCord': 'WebCord'}
+
+
+def discord_token(b):
+    """Whether Local Storage bytes hold a Discord token that needs no keyring to read (the value is never kept)."""
+    if b'dQw4w9WgXcQ:djEw' in b: return True
+    for m in re.finditer(rb'"([\w-]{23,27})\.[\w-]{6}\.[\w-]{27,38}"', b):   # ponytail: a token split by leveldb's compression is missed
+        try:
+            if base64.urlsafe_b64decode(m[1] + b'=' * (-len(m[1]) % 4)).isdigit(): return True
+        except ValueError: pass
+    return False
+
+
+@check('Stealable app sign-ins', 'Privacy')
+def sign_ins():
+    """App sign-ins any program can copy and replay to be logged in as you, past the password and 2FA (what
+    Discord-token stealers in cheats, cracked games and "free Nitro" tools take)."""
+    for d, app in DISCORD.items():
+        for f in files(f'{d}/Local Storage/leveldb/*.ldb', f'{d}/Local Storage/leveldb/*.log'):
+            try:
+                with open(f, 'rb') as fh: b = fh.read(64 << 20)
+            except OSError: continue
+            if discord_token(b):
+                yield item(f'{app} keeps your sign-in token where any program can read it',
+                           fix='A stealer that copies it is signed in as you without your password or 2FA; Discord on Linux does not '
+                               'encrypt it. Keep cheats, cracked games and "free Nitro" tools off this PC; if one ran, change your Discord '
+                               'password, which signs out every copied token.')
+                break
 
 
 @check('Trusted certificates', 'Network')
