@@ -3,6 +3,7 @@
 import configparser, json, os, re
 from .core import check, alert, warn, item, sh, have, text, files, HOME
 from .ai import secret_kinds
+from .malware import walk
 
 
 def comm(pid): return text(f'/proc/{pid}/comm').strip() or f'pid {pid}'
@@ -175,3 +176,53 @@ def history():
         if n: yield warn(f'{f.replace(HOME, "~")} holds {n} commands with secrets ({", ".join(kinds)})',
                          fix='Delete those lines from the file and change the secrets. Start a command with a space to keep it out of '
                              'history (bash: HISTCONTROL=ignorespace), or pass secrets through a file or prompt instead.')
+
+
+SENSITIVE_EXT = {'.txt', '.csv', '.md', '.json', '.rtf', '.text', '.note', '.pem', '.key', ''}
+CARD = re.compile(r'(?<![\d.-])(?:4\d{3}|5[1-5]\d{2}|2[2-7]\d{2}|3[47]\d{2}|6(?:011|5\d{2}))(?:[ -]?\d{4}){2}[ -]?\d{1,7}(?![\d.-])')
+CARD_WORDS = re.compile(r'\b(card|visa|mastercard|amex|cvv|cvc|expir)', re.I)
+NOT_BIP39 = {'the', 'and', 'for', 'that', 'this', 'with', 'you', 'are', 'was', 'not', 'but', 'have', 'from', 'they', 'will', 'there',
+             'their', 'what', 'when', 'which', 'your', 'can', 'has', 'had', 'were', 'been', 'its', 'our', 'him', 'her', 'his', 'she'}
+WALLET_WORDS = re.compile(r'seed|recovery|mnemonic|phrase|wallet|metamask|ledger|trezor|exodus|phantom|bip39', re.I)
+
+
+def luhn(d):
+    total = sum(int(c) if i % 2 == 0 else (int(c) * 2 - 9 if int(c) > 4 else int(c) * 2) for i, c in enumerate(reversed(d)))
+    return total % 10 == 0
+
+
+def sensitive(name, t):
+    """Kinds of sensitive data in one plain-text file (nothing of the data itself)."""
+    kinds, head = [], t[:2000].lower()
+    cols = set(re.findall(r'[a-z_]+', head.split('\n', 1)[0]))   # a CSV export's header line
+    if {'url', 'password'} <= cols and cols & {'username', 'login', 'login_username'} or \
+       ('"encrypted": false' in head and '"login"' in t[:200000]):
+        kinds.append('a password-manager export')
+    if '-----BEGIN' in t and re.search(r'-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----', t):
+        kinds.append('a private key' + (' (passphrase-protected)' if 'ENCRYPTED' in t or 'Proc-Type: 4,ENCRYPTED' in t else ''))
+    if CARD_WORDS.search(t) and any(luhn(re.sub(r'\D', '', m)) for m in CARD.findall(t)): kinds.append('card numbers')
+    if (WALLET_WORDS.search(name) or WALLET_WORDS.search(t[:20000])) and recovery_phrase(t): kinds.append('a wallet recovery phrase')
+    return kinds
+
+
+def recovery_phrase(t):
+    """A run of exactly 12-24 (in steps of 3) short lowercase words, none of them common English, at most one repeated;
+    numbering like '1.' between the words is allowed. Linear in the text."""
+    run = []
+    for tok in re.findall(r'[^\s,]+', t) + ['.']:
+        if re.fullmatch(r'\d{1,2}[.):]?', tok): continue
+        if re.fullmatch(r'[a-z]{3,8}', tok) and tok not in NOT_BIP39: run.append(tok); continue
+        if len(run) in (12, 15, 18, 21, 24) and len(set(run)) >= len(run) - 1: return True
+        run = []
+    return False
+
+
+@check('Sensitive files', 'Privacy')
+def sensitive_files():
+    """Password exports, private keys, card numbers and wallet recovery phrases saved as plain text where infostealers look."""
+    for p, st in walk([f'{HOME}/{d}' for d in ('Desktop', 'Documents', 'Downloads')], 3):
+        if st.st_size > (1 << 20) or os.path.splitext(p)[1].lower() not in SENSITIVE_EXT: continue
+        if kinds := sensitive(os.path.basename(p), text(p)):
+            yield warn(f'{p.replace(HOME, "~")} holds {" and ".join(kinds)} in plain text',
+                       fix='Infostealers copy files like this first. Move it into your password manager or an encrypted vault '
+                           '(KeePassXC, Cryptomator), then delete it and empty the Trash. Encrypted keys are lower risk.')

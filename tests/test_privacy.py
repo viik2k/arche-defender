@@ -95,3 +95,26 @@ class Portal(unittest.TestCase):
                          [(WARN, 'Unsandboxed apps (no app ID) may control your mouse and keyboard (remote desktop) without asking'),
                           (INFO, 'org.telegram.desktop may use the camera'), (INFO, 'org.gnome.Maps may see your location')])
         self.assertTrue(rows[0][2].endswith('permission-remove kde-authorized remote-desktop'))
+
+
+class Sensitive(unittest.TestCase):
+    PHRASE = 'abandon ability able about above absent absorb abstract absurd abuse access accident'
+
+    def test_kinds(self):
+        S = privacy.sensitive
+        self.assertEqual(S('pw.csv', 'name,url,username,password,note\nx,https://a,b,c,\n'), ['a password-manager export'])
+        self.assertEqual(S('k', '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n'), ['a private key'])
+        self.assertEqual(S('c.txt', 'Visa 4111 1111 1111 1111 exp 12/29'), ['card numbers'])
+        self.assertEqual(S('c.txt', 'card 4111 1111 1111 1112'), [])                    # fails Luhn
+        self.assertEqual(S('p.json', '{"x": 4111111111111111.5}'), [])                  # no card words, decimal
+        self.assertEqual(S('seed.txt', self.PHRASE), ['a wallet recovery phrase'])
+        self.assertEqual(S('seed.txt', '\n'.join(f'{i}. {w}' for i, w in enumerate(self.PHRASE.split(), 1))), ['a wallet recovery phrase'])
+        self.assertEqual(S('notes.txt', self.PHRASE), [])                               # no wallet context
+        self.assertEqual(S('seed.txt', self.PHRASE + ' extra'), [])                     # 13 words
+        self.assertEqual(S('seed.txt', 'the ' + self.PHRASE[8:]), [])                   # common English
+
+    def test_linear(self):
+        import time
+        t, s = '\t \n' * 300000 + 'url', time.time()
+        privacy.sensitive('driveline', t)
+        self.assertLess(time.time() - s, 1)
