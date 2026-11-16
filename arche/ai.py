@@ -132,11 +132,12 @@ def scan_tree(root, label, limit=1 << 20):
             yield from scan_text(text(p), f'{label} {tilde(p)}')
 
 
-def fingerprint(root):
+def fingerprint(root, ext=None):
     """Short hash of every file under root (or of one file): it changes when a plugin or skill's code does,
     so an update that quietly swaps what you approved (a rug pull) shows up as new against the baseline."""
     h, paths = hashlib.sha256(), [root] if os.path.isfile(root) else sorted(
-        os.path.join(d, f) for d, dirs, fs in os.walk(root) if not re.search(r'/(\.git|__pycache__)(/|$)', d) for f in fs)
+        os.path.join(d, f) for d, dirs, fs in os.walk(root) if not re.search(r'/(\.git|__pycache__)(/|$)', d) for f in fs
+        if ext is None or os.path.splitext(f)[1].lower() in ext)   # ext: code only, for add-ons that ship gigabytes of weights
     # ponytail: __pycache__ is left out because running the plugin rewrites it; a planted .pyc is the scanners' job, not this one
     for p in paths:
         try:
@@ -834,6 +835,63 @@ def hub_code():
             for layer in jsonf(mf).get('layers') or []:
                 if str(layer.get('mediaType', '')).rsplit('.', 1)[-1] in ('system', 'template', 'messages', 'prompt'):
                     yield from scan_text(text(f'{root}/blobs/{str(layer.get("digest", "")).replace(":", "-")}'), f'Ollama model {name}')
+
+
+ADDON_HOMES = ('~/ComfyUI', '~/Documents/ComfyUI', '~/.local/share/StabilityMatrix/Packages/*', '~/StabilityMatrix/Data/Packages/*',
+               '~/pinokio/api/*/app')   # plus every git checkout repos() finds, and the ComfyUI desktop app's basePath
+CODE_EXT = {'.py', '.js', '.mjs', '.cjs', '.ts', '.sh'}
+DIRECT = re.compile(r'^\s*(?:([\w.-]+)\s*@\s*)?((?:git\+)?https?://[^\s;#]+)', re.M)
+
+
+def addon_roots():
+    """(kind, add-on folder, app folder) for each ComfyUI and Stable Diffusion WebUI (A1111, Forge) install."""
+    base = jsonf(f'{HOME}/.config/ComfyUI/config.json')
+    base = base.get('basePath') if isinstance(base, dict) else None
+    for r in sorted({*repos(), *files(*ADDON_HOMES), *([base] if isinstance(base, str) else [])}):
+        if os.path.isdir(f'{r}/custom_nodes') and (os.path.isdir(f'{r}/comfy') or os.path.isdir(f'{r}/models')):
+            yield 'ComfyUI custom node', f'{r}/custom_nodes', r
+        if os.path.isdir(f'{r}/extensions') and os.path.isfile(f'{r}/webui.py'): yield 'Stable Diffusion WebUI extension', f'{r}/extensions', r
+
+
+def direct_reqs(t):
+    """(package, host) for each requirements line that skips the package index: a wheel or repo fetched straight from a URL."""
+    from urllib.parse import urlparse
+    for name, url in DIRECT.findall(t):
+        yield name or os.path.basename(url.split('#')[0]).split('-')[0].removesuffix('.git'), urlparse(url.removeprefix('git+')).hostname
+
+
+def webui_args(t):
+    """Launch flags set in a webui-user.sh (commented-out lines ignored)."""
+    return ' '.join(re.findall(r'^\s*(?:export\s+)?COMMANDLINE_ARGS\s*=\s*["\']?([^"\'\n]*)', t, re.M)).split()
+
+
+@check('ComfyUI and WebUI add-ons', FAM)
+def addons():
+    """ComfyUI custom nodes and Stable Diffusion WebUI extensions: other people's Python that runs unsandboxed as you every time the
+    app starts (ComfyUI_LLMVISION stole browser passwords this way, through look-alike wheels in its requirements.txt)."""
+    # ponytail: scans every text file of every add-on on each run; cache by fingerprint if a big install makes the quick scan slow
+    for kind, d, app in addon_roots():
+        for a in files(f'{d}/*'):
+            n = os.path.basename(a)
+            if n.startswith(('.', '__')) or not (os.path.isdir(a) or n.endswith('.py')): continue   # .disabled, __pycache__, README
+            m = re.search(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)', text(f'{a}/.git/config'))
+            src = re.sub(r'//[^/@\s]+@', '//', m[1]) if m else 'no git remote'
+            yield item(f'{kind} {n.removesuffix(".py")} ({tilde(a)}), from {src}, code {fingerprint(a, CODE_EXT)}')
+            hits = scan_tree(a, kind) if os.path.isdir(a) else scan_text(text(a), f'{kind} {tilde(a)}')
+            yield from ((t, sev, f'Remove {tilde(a)} unless you trust its author, then restart the app') for t, sev, _ in hits)
+            for f in files(f'{a}/requirements*.txt'):
+                for pkg, host in direct_reqs(text(f)): yield item(f'{kind} {n} installs {pkg} straight from {host}, not from PyPI ({tilde(f)})')
+        for cfg in files(f'{app}/user/default/ComfyUI-Manager/config.ini', f'{app}/user/__manager/config.ini', f'{d}/ComfyUI-Manager/config.ini'):
+            if re.search(r'^\s*security_level\s*=\s*weak\b', text(cfg), re.M | re.I):
+                yield warn(f'ComfyUI-Manager in {tilde(app)} runs at security_level = weak: anyone who can open ComfyUI\'s page can install '
+                           'custom nodes from any git URL and any pip package, which run as you', f'Set security_level = normal in {tilde(cfg)}')
+        a = webui_args(text(f'{app}/webui-user.sh'))
+        if '--enable-insecure-extension-access' in a and ({'--listen', '--share'} & set(a)):
+            yield warn(f'Stable Diffusion WebUI in {tilde(app)} lets anyone who can reach it over the network install extensions, which run as you',
+                       f'Remove --enable-insecure-extension-access from {tilde(app)}/webui-user.sh')
+        if '--share' in a and not any(x.startswith('--gradio-auth') for x in a):
+            yield warn(f'Stable Diffusion WebUI in {tilde(app)} is shared on a public gradio.live link with no password',
+                       f'Add --gradio-auth user:password, or drop --share, in {tilde(app)}/webui-user.sh')
 
 
 @check('AI model files', FAM, slow=True)

