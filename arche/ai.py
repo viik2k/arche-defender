@@ -255,7 +255,8 @@ def contents():
 
 
 APPROVALS_OFF = re.compile(r'--dangerously-skip-permissions|--permission-mode[= ]+["\']?bypassPermissions|'
-                          r'--dangerously-bypass-approvals-and-sandbox|--yolo\b|--allow-all(-tools)?\b|--trust-all-tools')   # --allow-all: Copilot CLI
+                          r'--dangerously-bypass-approvals-and-sandbox|--yolo\b|--allow-all(-tools)?\b|--trust-all-tools|'   # --allow-all: Copilot CLI
+                          r'--dangerously-allow-all|--yes-always\b|--approval-mode[= ]+["\']?yolo')   # Amp, aider, Gemini CLI and Qwen Code
 # An API base URL in your shell start-up or session environment reroutes every agent and SDK that reads it (Claude Code, Codex,
 # aider, the openai/anthropic libraries): that host gets each prompt, the files the agent reads, and the API key.
 AI_BASE = re.compile(r'^\s*(?:export\s+|set\s+-\w*x\w*\s+)?((?:ANTHROPIC|OPENAI|GEMINI|GOOGLE_GEMINI|OPENROUTER|DEEPSEEK|MISTRAL|GROQ|XAI)_'
@@ -263,6 +264,14 @@ AI_BASE = re.compile(r'^\s*(?:export\s+|set\s+-\w*x\w*\s+)?((?:ANTHROPIC|OPENAI|
 AI_HOSTS = re.compile(r'^https://([\w-]+\.)*(anthropic\.com|openai\.com|openai\.azure\.com|googleapis\.com|amazonaws\.com|openrouter\.ai|'
                       r'deepseek\.com|mistral\.ai|groq\.com|x\.ai)(:\d+)?(/|$)|^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(/|$)')
 CLOUD = re.compile(r'^https://([\w-]+\.)*(anthropic\.com|amazonaws\.com|googleapis\.com)(:\d+)?(/|$)')
+
+
+# Agents whose own config turns approvals off; a line commented out with // or # does not count.
+AUTO_APPROVE = (('~/.config/zed/settings.json', r'"always_allow_tool_actions"\s*:\s*true', 'Zed agent', 'Set agent.always_allow_tool_actions to false'),
+                ('~/.config/amp/settings.json', r'"amp\.dangerouslyAllowAll"\s*:\s*true', 'Amp', 'Remove amp.dangerouslyAllowAll'),
+                ('~/.qwen/settings.json', r'"(approvalMode"\s*:\s*"yolo|(yolo|autoAccept)"\s*:\s*true)', 'Qwen Code', 'Use approvalMode "default"'),
+                ('~/.aider.conf.yml', r'\byes-always\s*:\s*true', 'aider', 'Remove yes-always, so aider asks before running shell commands'),
+                ('~/.config/crush/crush.json', r'"allowed_tools"\s*:\s*\[[^\]]*"bash"', 'Crush', 'Remove "bash" from permissions.allowed_tools'))
 
 
 @check('AI agent permissions', FAM)
@@ -282,6 +291,8 @@ def permissions():
         yield warn('Goose runs every tool without asking (GOOSE_MODE: auto)', 'Use smart_approve or approve: goose configure > Goose Settings > Mode')
     if re.search(r'"(yolo|autoAccept)"\s*:\s*true', text(f'{HOME}/.gemini/settings.json')):
         yield warn('Gemini CLI auto-accepts tool calls', 'Turn off autoAccept/yolo in ~/.gemini/settings.json')
+    for f, pat, name, fix in AUTO_APPROVE:
+        if re.search(rf'^(?!\s*(//|#)).*?{pat}', text(f'{HOME}/{f[2:]}'), re.M): yield warn(f'{name} runs commands without asking ({f})', fix)
     for f in files(*OPENCLAW):   # JSON5, so plain regexes rather than a parser
         t, where = text(f), tilde(f)
         for k in sorted(set(re.findall(r'["\']?(dangerously\w+|allowInsecureAuth)["\']?\s*:\s*true', t))):

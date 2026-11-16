@@ -449,6 +449,21 @@ def test_local_servers():
     finally: ai.sh = real
     assert rows == [('n8n (node) is reachable from your network on port 5678 with no password', 1), ('Qdrant (qdrant) listens on this PC only', 0)], rows
 
+def test_auto_approve():
+    from arche import ai
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    for f, body in (('.config/zed/settings.json', '{\n  "agent": {\n    // "always_allow_tool_actions": true,\n    "always_allow_tool_actions": true\n  }\n}'),
+                    ('.config/amp/settings.json', '{"amp.dangerouslyAllowAll": false}'), ('.qwen/settings.json', '{\n  "tools": {"approvalMode": "yolo"}\n}'),
+                    ('.aider.conf.yml', '# yes-always: true\nyes-always: true\n'),
+                    ('.config/crush/crush.json', '{\n "permissions": {\n  "allowed_tools": [\n   "view",\n   "bash"\n  ]\n }\n}')):
+        os.makedirs(os.path.dirname(f'{d}/{f}'), exist_ok=True); open(f'{d}/{f}', 'w').write(body)
+    home, ai.HOME = ai.HOME, d
+    try: rows = [t.split(' runs')[0] for t, s, _ in ai.permissions() if ' runs commands without asking (~/' in t]
+    finally: ai.HOME = home
+    assert rows == ['Zed agent', 'Qwen Code', 'aider', 'Crush'], rows
+    assert all(ai.APPROVALS_OFF.search(l) for l in ('amp --dangerously-allow-all', 'aider --yes-always', 'gemini --approval-mode=yolo'))
+    assert not ai.APPROVALS_OFF.search('gemini --approval-mode auto_edit')
+
 
 if __name__ == '__main__':
-    test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_auto_approve(); test_local_servers(); test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
