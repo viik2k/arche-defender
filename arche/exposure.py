@@ -88,6 +88,8 @@ WAN = re.compile(r'urn:schemas-upnp-org:service:WAN(IP|PPP)Connection:\d')
 
 def igd_locations(wait=3):
     """Description URLs of UPnP internet gateways on the LAN; only URLs pointing at the device that answered."""
+    # ponytail: replies to a multicast query are not 'established' to conntrack, so a zone without high UDP ports open
+    # (firewalld 'public') drops them and this finds nothing; binding a port and opening it would need root.
     s, out, end = socket.socket(socket.AF_INET, socket.SOCK_DGRAM), set(), time.time() + wait
     try:
         s.sendto(SSDP, ('239.255.255.250', 1900))
