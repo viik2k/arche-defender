@@ -26,9 +26,8 @@ def copy_query(db, sql, args=()):
 
 def chromium_profiles():
     """(browser, profile folder) for every Chromium-family profile, native and Flatpak."""
-    for name, sub, flat in CHROMIUM:
-        for root in (f'{HOME}/.config/{sub}', f'{HOME}/.var/app/{flat}/config/{sub}'):
-            for prefs in files(f'{root}/*/Preferences'): yield name, os.path.dirname(prefs)
+    for name, root in chromium_roots():
+        for prefs in files(f'{root}/*/Preferences'): yield name, os.path.dirname(prefs)
 
 
 def label(name, prof): return f'{name}' + ('' if os.path.basename(prof) == 'Default' else f' ({os.path.basename(prof)})')
