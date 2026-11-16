@@ -1,7 +1,7 @@
 # Protection status: is the machine's own armour on? Firewall, SELinux, Secure Boot, disk encryption, kernel
 # hardening, login and screen lock, SSH server, and files that hold secrets. Weak settings are WARN with a fix.
 import os, re, stat, time
-from .core import HOME, PKG, UPGRADE, alert, warn, item, sh, have, text, lines, files, check
+from .core import HOME, PKG, UPGRADE, alert, warn, item, sh, have, text, lines, files, check, owned
 
 INFRA_IF = re.compile(r'^(lo|docker\d*|br-|virbr|veth|tailscale|podman|cni|vnet|wg|zt)')
 
@@ -100,6 +100,22 @@ def kernel():
     if text('/proc/sys/net/ipv4/ip_forward').strip() == '1': yield item('IP forwarding is on (normal with Docker, libvirt or Tailscale exit nodes)')
 
 
+# ponytail: /etc/polkit-1/rules.d is root-only to read, so a rule dropped there is missed without root
+POLKIT = ('/usr/share/polkit-1/rules.d/*.rules', '/etc/polkit-1/rules.d/*.rules')
+
+
+def polkit_rows():
+    """polkit rules no package installed (one that answers YES lets programs do admin actions without asking), and the empower group."""
+    pk = files(*POLKIT)
+    for f in sorted(set(pk) - owned(pk)):
+        if 'Result.YES' in text(f): yield warn(f'polkit rule {f} lets programs do admin actions without a password, and no package installed it',
+                                               f'Read it; if you did not add it, delete it: sudo rm {f}')
+        else: yield item(f'polkit rule no package installed: {f}')
+    if 'empower' in sh('id', '-Gn').split():   # systemd's empower.rules answers YES to every action for that group (run0 --empower)
+        yield warn('This account is in the empower group: every polkit admin action runs without a password, which is root',
+                   'sudo gpasswd -d $USER empower')
+
+
 @check('Login and screen lock', 'Protection')
 def login():
     for f in files('/etc/sddm.conf', '/etc/sddm.conf.d/*.conf', '/etc/plasmalogin.conf', '/etc/plasmalogin.conf.d/*.conf'):
@@ -119,6 +135,7 @@ def login():
     if 'NOPASSWD' in sh('sudo', '-n', '-l', timeout=5):
         yield warn('sudo works without a password for this account: any program you run can become root',
                    'Remove NOPASSWD from /etc/sudoers.d (sudo visudo -f <file>)')
+    yield from polkit_rows()
 
 
 @check('SSH server', 'Protection')

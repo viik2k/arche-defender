@@ -45,5 +45,17 @@ def test_kube_rows():
                     ('~/.kube/config runs aws on every kubectl login (exec plugin)', 0)], rows
 
 
+def test_polkit():
+    import arche.hardening as h, tempfile, shutil, atexit
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    for n, body in (('a.rules', 'polkit.addRule(function(a, s) { return polkit.Result.YES; });'), ('b.rules', 'return polkit.Result.AUTH_ADMIN;'), ('pkg.rules', 'Result.YES')):
+        open(f'{d}/{n}', 'w').write(body)
+    old = h.POLKIT, h.owned, h.sh
+    h.POLKIT, h.owned, h.sh = (f'{d}/*.rules',), lambda ps: {p for p in ps if p.endswith('pkg.rules')}, lambda *a, **k: 'finn wheel empower'
+    try: rows = [(r[0].replace(d, '~'), r[1]) for r in h.polkit_rows()]
+    finally: h.POLKIT, h.owned, h.sh = old
+    assert [s for _, s in rows] == [1, 0, 1] and rows[0][0].startswith('polkit rule ~/a.rules lets') and 'empower' in rows[2][0], rows
+
+
 if __name__ == '__main__':
-    test_kube_rows(); test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')
+    test_polkit(); test_kube_rows(); test_firewall_v6(); test_plain_swap(); test_ssh_client_rows(); print('ok')
