@@ -125,7 +125,23 @@ Icon=security-high
 Categories=System;Security;
 StartupWMClass=Arche-defender
 ''')
-    return f'Added to the app menu: {p} (delete that file to remove it)'
+    # Dolphin's right-click menu; KF6 ignores a service menu that is not executable.
+    # ponytail: KDE only; a Nautilus script or Nemo action is the same few lines when someone on GNOME/Cinnamon wants it
+    m = p.parent.parent / 'kio/servicemenus/arche-defender-scan.desktop'
+    m.parent.mkdir(parents=True, exist_ok=True)
+    m.write_text(f'''[Desktop Entry]
+Type=Service
+MimeType=all/allfiles;inode/directory;
+Actions=scan
+X-KDE-Priority=TopLevel
+
+[Desktop Action scan]
+Name=Scan with Arche Defender
+Icon=security-high
+Exec="{sys.executable}" "{LAUNCHER}" --window scan %f
+''')
+    m.chmod(0o755)
+    return f'Added to the app menu ({p}) and to the file manager\'s right-click menu ({m}); delete those files to remove them'
 
 
 @action('uninstall-monitor', 'stop the background monitor')

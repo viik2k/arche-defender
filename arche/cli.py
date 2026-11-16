@@ -69,6 +69,16 @@ def scan(args):
     return exit_code(res)
 
 
+def window(title, body):
+    """An action's result in a small read-only window, for launchers that have no terminal."""
+    import tkinter as tk
+    from tkinter.scrolledtext import ScrolledText
+    root = tk.Tk(className='Arche-defender'); root.title(f'Arche Defender: {title}')
+    t = ScrolledText(root, width=110, height=min(32, body.count('\n') + 3), wrap='word')
+    t.insert('1.0', body); t.configure(state='disabled'); t.pack(fill='both', expand=True)
+    tk.Button(root, text='Close', command=root.destroy).pack(pady=4); root.mainloop()
+
+
 def main(argv=None):
     load_all()
     p = argparse.ArgumentParser(prog='arche-defender', description='Open-source PC security sweep. No arguments opens the window.',
@@ -82,6 +92,7 @@ def main(argv=None):
     p.add_argument('--json', action='store_true', help='with --scan: print JSON')
     p.add_argument('--only', action='append', metavar='CHECK', help='with --scan or --monitor: run just this check (repeatable)')
     p.add_argument('--accept', action='store_true', help='with --scan: save the results as the new baseline')
+    p.add_argument('--window', action='store_true', help='with an action: show its result in a window (the file-manager menu uses this)')
     p.add_argument('--monitor', action='store_true', help='one background pass: scan and notify about new findings (the timer runs this)')
     args = p.parse_args(argv)
     if args.action:
@@ -90,8 +101,12 @@ def main(argv=None):
             if args.arg: print('Note: that password is now in your shell history; next time leave it off and you will be asked.', file=sys.stderr)
             else: args.arg = getpass.getpass('Password (not shown): ')
         if argname and not args.arg: p.error(f'{args.action} needs {argname.upper()}')
-        try: print(fn(args.arg) if argname else fn())
-        except ValueError as e: p.error(str(e))
+        try: out = fn(args.arg) if argname else fn()
+        except ValueError as e:
+            if not args.window: p.error(str(e))
+            out = str(e)
+        if args.window: window(args.action, out)
+        else: print(out)
         return 0
     if args.selftest: return selftest()
     if args.scan: return scan(args)

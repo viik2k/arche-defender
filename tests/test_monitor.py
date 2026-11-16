@@ -58,5 +58,17 @@ def test_weekly_run_refreshes_deps_once_opted_in():
     finally: intel.feed_age_days, deps.update, deps.DB, cli.pick, cli.scan_all, monitor.record, monitor.SEEN, monitor.have = real
 
 
+def test_install_desktop_adds_scan_menu():
+    import atexit, shutil, tempfile, stat
+    from arche import monitor
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    old, os.environ['XDG_DATA_HOME'] = os.environ.get('XDG_DATA_HOME'), d
+    try: monitor.desktop()
+    finally: os.environ.pop('XDG_DATA_HOME') if old is None else os.environ.__setitem__('XDG_DATA_HOME', old)
+    m = f'{d}/kio/servicemenus/arche-defender-scan.desktop'
+    assert os.stat(m).st_mode & stat.S_IXUSR and '--window scan %f' in open(m).read()
+    assert os.path.isfile(f'{d}/applications/arche-defender.desktop')
+
+
 if __name__ == '__main__':
-    test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); print('ok')
+    test_fresh(); test_watch_run_keeps_other_notices(); test_hourly_run_refreshes_intel(); test_weekly_run_refreshes_deps_once_opted_in(); test_install_desktop_adds_scan_menu(); print('ok')
