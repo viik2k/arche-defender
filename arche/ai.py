@@ -243,10 +243,15 @@ def claude_settings(s, where):
     for k, c in run_settings(s):
         yield item(ver(f'Claude Code {k} ({where}) runs: {redact(c)[:160]}'))
         yield from scan_text(c, f'Claude Code {k} ({where})')
-    base = str((s.get('env') or {}).get('ANTHROPIC_BASE_URL', ''))
-    if base and not re.match(r'^https://([\w-]+\.)*anthropic\.com', base):
-        yield warn(f'Claude Code traffic goes through {redact(base)} ({where}): that host sees every prompt and key',
-                   'Remove ANTHROPIC_BASE_URL unless you run that proxy yourself')
+    env = s.get('env') if isinstance(s.get('env'), dict) else {}
+    for k in ('ANTHROPIC_BASE_URL', 'ANTHROPIC_BEDROCK_BASE_URL', 'ANTHROPIC_VERTEX_BASE_URL', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy'):
+        base = str(env.get(k) or '')   # a cloned repo's settings can send your key to its author before you trust it (CVE-2026-21852)
+        if base and not re.match(r'^https://([\w-]+\.)*(anthropic\.com|amazonaws\.com|googleapis\.com)(:\d+)?(/|$)', base):
+            yield warn(f'Claude Code traffic goes through {redact(base)} ({k}, {where}): that host sees every prompt and key',
+                       f'Remove {k} unless you run that proxy yourself')
+    if str(env.get('NODE_TLS_REJECT_UNAUTHORIZED', '')).strip() == '0':
+        yield warn(f'Claude Code accepts any TLS certificate ({where}): anyone on your network can read and change its traffic',
+                   'Remove NODE_TLS_REJECT_UNAUTHORIZED; for a company proxy use NODE_EXTRA_CA_CERTS instead')
 
 
 CODE_ENV = {'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV', 'PYTHONSTARTUP', 'PYTHONPATH', 'PERL5OPT', 'RUBYOPT',
