@@ -11,15 +11,20 @@ LAUNCHER = Path(__file__).resolve().parent / '__main__.py'   # works from a git 
 WEEK = 7 * 86400
 # Check -> folders whose change re-runs it within seconds (one .path unit each, not recursive): near-real-time
 # download, persistence and ransomware detection with no daemon.
-WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'), 'Startup entries': ('%h/.config/autostart',),
+WATCH = {'Dropped files': ('%h/Downloads', '%h/Desktop', '%h/.local/bin'),
+         'Startup entries': ('%h/.config/autostart', '%h/.config/autostart-scripts', '%h/.config/plasma-workspace/env',
+                             # malware appends to shell start-up files more than anywhere else; each line is an item, so an added one is new
+                             '%h/.bashrc', '%h/.bash_profile', '%h/.profile', '%h/.zshrc', '%h/.zshenv', '%h/.config/fish/config.fish'),
          'Services': ('%h/.config/systemd/user',), 'Ransomware tripwire': ('%h/Documents', '%h/Pictures'),
          'Command hooks': ('%h/.local/share/dbus-1/services', '%h/.local/share/applications', '%h/.local/share/kio/servicemenus'),
          'Desktop add-ons': ('%h/.local/share/plasma/plasmoids', '%h/.local/share/kwin/scripts', '%h/.local/share/gnome-shell/extensions'),
          # not ~/.claude itself: Claude Code writes its history there on every prompt
-         'AI plugins, skills and hooks': ('%h/.claude/skills', '%h/.claude/plugins', '%h/.codex/skills', '%h/.gemini/extensions', '%h/.agents/skills'),
+         'AI plugins, skills and hooks': ('%h/.claude/skills', '%h/.claude/plugins', '%h/.codex/skills', '%h/.gemini/extensions', '%h/.agents/skills',
+                                          '%h/.copilot/installed-plugins', '%h/.openclaw/skills'),
          # a new MCP server, from the agents' config files; not ~/.claude.json, which Claude Code rewrites on every prompt
          'MCP servers': ('%h/.cursor/mcp.json', '%h/.gemini/settings.json', '%h/.codex/config.toml', '%h/.config/Code/User/mcp.json',
-                         '%h/.config/Claude/claude_desktop_config.json', '%h/.codeium/windsurf/mcp_config.json', '%h/.config/goose/config.yaml'),
+                         '%h/.config/Claude/claude_desktop_config.json', '%h/.codeium/windsurf/mcp_config.json', '%h/.config/goose/config.yaml',
+                         '%h/.continue/config.yaml', '%h/.config/opencode/opencode.json', '%h/.copilot/mcp-config.json', '%h/.qwen/settings.json'),
          # a ClickFix paste, found when the shell saves its history (at exit, or after each command with history -a); the check takes 0.3 s
          'Risky commands in shell history': ('%h/.bash_history', '%h/.zsh_history', '%h/.local/share/fish/fish_history')}
 ALSO = {'Ransomware tripwire': ('Encrypted files',), 'AI plugins, skills and hooks': ('AI skill and plugin contents',),
@@ -146,7 +151,8 @@ def tamper():
     elif (up := text('/proc/uptime').split()) and float(up[0]) > 3600 and SEEN.exists() and time.time() - SEEN.stat().st_mtime > 2 * 86400:
         yield warn(f'The background monitor has not run since {time.strftime("%Y-%m-%d %H:%M", time.localtime(SEEN.stat().st_mtime))}',
                    'Check it with: systemctl --user status arche-defender.service')
-    if miss := [c for c in WATCH if c in CHECKS and not (UNITS / f'{watch_unit(c)}.path').exists()]:
+    # a missing unit, or one written by an older version that watches fewer paths
+    if miss := [c for c in WATCH if c in CHECKS and not set(WATCH[c]) <= set(re.findall(r'^PathChanged=(.+)$', text(UNITS / f'{watch_unit(c)}.path'), re.M))]:
         yield item(f'This version watches more than the installed monitor does ({", ".join(miss)})', 'Run: arche-defender install-monitor')
 
 

