@@ -199,6 +199,14 @@ def permissions():
             yield warn(f'Folders can start tasks automatically when opened ({tilde(f)})', 'Set task.allowAutomaticTasks to "off"')
 
 
+def run_settings(s):
+    """(setting, command) for Claude Code settings that run a command, and env vars that make what it starts load code."""
+    cmds = [(k, s[k]) for k in ('apiKeyHelper', 'awsAuthRefresh', 'awsCredentialExport', 'otelHeadersHelper') if isinstance(s.get(k), str)]
+    if isinstance(s.get('statusLine'), dict) and s['statusLine'].get('type') == 'command': cmds.append(('statusLine', str(s['statusLine'].get('command', ''))))
+    env = s.get('env') if isinstance(s.get('env'), dict) else {}
+    return cmds + [(f'env {k}', str(v)) for k, v in env.items() if k in CODE_ENV]
+
+
 def claude_settings(s, where):
     p = s.get('permissions') or {}
     if p.get('defaultMode') == 'bypassPermissions':
@@ -211,10 +219,17 @@ def claude_settings(s, where):
             yield item(f'Claude Code auto-starts every MCP server in this project\'s .mcp.json ({where})')   # you approved it here
         else: yield warn(f'Claude Code auto-starts MCP servers from .mcp.json without asking ({where}): a cloned repo can run code',
                          'Remove "enableAllProjectMcpServers" and approve servers one by one')
-    base = (s.get('env') or {}).get('ANTHROPIC_BASE_URL', '')
+    for k, c in run_settings(s):
+        yield item(ver(f'Claude Code {k} ({where}) runs: {redact(c)[:160]}'))
+        yield from scan_text(c, f'Claude Code {k} ({where})')
+    base = str((s.get('env') or {}).get('ANTHROPIC_BASE_URL', ''))
     if base and not re.match(r'^https://([\w-]+\.)*anthropic\.com', base):
         yield warn(f'Claude Code traffic goes through {redact(base)} ({where}): that host sees every prompt and key',
                    'Remove ANTHROPIC_BASE_URL unless you run that proxy yourself')
+
+
+CODE_ENV = {'NODE_OPTIONS', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'BASH_ENV', 'ENV', 'PYTHONSTARTUP', 'PYTHONPATH', 'PERL5OPT', 'RUBYOPT',
+            'GIT_SSH_COMMAND', 'GIT_EXTERNAL_DIFF', 'GIT_ASKPASS', 'SSH_ASKPASS', 'PAGER', 'EDITOR', 'PROMPT_COMMAND', 'SHELL'}
 
 
 AGENT_BYPASS = re.compile(r'^(--dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo|--yes-always|'
@@ -357,11 +372,16 @@ def projects():
         for f in files(f'{r}/.claude/settings.json', f'{r}/.claude/settings.local.json'):
             s = jsonf(f)
             yield from claude_settings(s, tilde(f))
+            n = len(run_settings(s))
             for ev, groups in (s.get('hooks') or {}).items():
                 for g in groups if isinstance(groups, list) else []:
                     for h in g.get('hooks', []) if isinstance(g, dict) else []:
+                        n += 1
                         yield item(ver(f'Project hook {ev} ({rr}): {redact(h.get("command", ""))[:160]}'))
                         yield from scan_text(h.get('command', ''), f'Project hook {ev} ({rr})')
+            if n and f.endswith('/settings.json'):   # settings.local.json is yours; settings.json is shared, so it comes with a clone
+                yield warn(f'{tilde(f)} runs {n} command(s) whenever Claude Code works in {rr} (hooks, status line, helpers)',
+                           "In a repo you cloned that is its authors' code: read it before trusting the folder")
         for t in (jsonc(f'{r}/.vscode/tasks.json').get('tasks') or []):
             if isinstance(t, dict) and (t.get('runOptions') or {}).get('runOn') == 'folderOpen':
                 yield warn(f'{rr}/.vscode/tasks.json runs a command as soon as the folder is opened: {redact(t.get("command", ""))[:120]}',

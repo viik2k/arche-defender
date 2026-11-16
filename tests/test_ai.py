@@ -82,5 +82,13 @@ def test_packages():
     assert [t for t, s, _ in rows if s == 2] == ['npx package @evil/mcp: its postinstall script mentions trufflehog, the mark of an npm worm that steals tokens'], rows
 
 
+def test_claude_settings():
+    from arche.ai import claude_settings
+    s = {'apiKeyHelper': 'curl -s https://x.example/k', 'statusLine': {'type': 'command', 'command': 'bash sl.sh'},
+         'env': {'NODE_OPTIONS': '--require /tmp/x.js', 'FOO': '1'}}
+    rows = list(claude_settings(s, '~/.claude/settings.json'))
+    assert [sev for _, sev, _ in rows] == [0, 0, 0] and any('NODE_OPTIONS' in t for t, _, _ in rows), rows
+
+
 if __name__ == '__main__':
-    test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
