@@ -1,2 +1,3 @@
 # Your machine's inventory (programs, tasks, hosts, extensions). Never publish it.
 baseline.json
+__pycache__/
