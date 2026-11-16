@@ -225,14 +225,11 @@ def plugins():
             whole = sk.endswith(('/SKILL.md', '/gemini-extension.json')) and os.path.dirname(sk) != os.path.expanduser(root)
             yield item(f'Skill/command {nm[1].strip() if nm else Path(sk).parent.name} ({tilde(sk)}), code {fingerprint(os.path.dirname(sk) if whole else sk)}')
     for f in files('~/.claude/settings.json', '~/.claude/settings.local.json', '/etc/claude-code/managed-settings.json',
-                   '~/.claude/plugins/cache/*/*/*/hooks/hooks.json', '~/.claude/plugins/cache/*/*/*/hooks.json'):
+                   '~/.claude/plugins/cache/*/*/*/hooks/hooks.json', '~/.claude/plugins/cache/*/*/*/hooks.json', *HOOK_FILES):
         where = re.sub(r'.*/plugins/cache/[^/]+/([^/]+)/.*', r'plugin \1', tilde(f))
-        for ev, groups in (jsonf(f).get('hooks') or {}).items():
-            for g in groups if isinstance(groups, list) else []:
-                for h in g.get('hooks', []) if isinstance(g, dict) else []:
-                    cmd = h.get('command') or h.get('url') or h.get('prompt') or ''
-                    yield item(ver(f'Hook {ev} ({where}): {redact(cmd)[:160]}'))
-                    yield from scan_text(cmd, f'Hook {ev} ({where})')
+        for ev, cmd in hook_cmds(jsonc(f)):
+            yield item(ver(f'Hook {ev} ({where}): {redact(cmd)[:160]}'))
+            yield from scan_text(cmd, f'Hook {ev} ({where})')
     for d in copilot_plugins(): yield item(f'Copilot CLI plugin {os.path.basename(d)} ({tilde(d)}), code {fingerprint(d)}')
     codex = text(f'{HOME}/.codex/config.toml')
     if m := re.search(r'^notify\s*=\s*(.+)$', codex, re.M): yield item(f'Codex notify hook: {redact(m[1])[:160]}')
@@ -309,6 +306,19 @@ def permissions():
             yield warn(f'Workspace Trust is off ({tilde(f)}): opened folders can run tasks and extensions code', 'Set security.workspace.trust.enabled to true')
         if s.get('task.allowAutomaticTasks') == 'on':
             yield warn(f'Folders can start tasks automatically when opened ({tilde(f)})', 'Set task.allowAutomaticTasks to "off"')
+
+
+HOOK_FILES = ('~/.gemini/settings.json', '~/.cursor/hooks.json', '~/.codeium/windsurf/hooks.json')
+PROJECT_HOOKS = ('.gemini/settings.json', '.cursor/hooks.json', '.windsurf/hooks.json', '.github/hooks/*.json')   # last: Copilot
+
+
+def hook_cmds(j):
+    """(event, command) from a hooks block: Claude Code and Gemini CLI nest them in matcher groups, Cursor, Windsurf and Copilot list them."""
+    hooks = j.get('hooks') if isinstance(j, dict) else None
+    for ev, groups in (hooks if isinstance(hooks, dict) else {}).items():
+        for g in groups if isinstance(groups, list) else []:
+            for h in (g['hooks'] if isinstance(g.get('hooks'), list) else [g]) if isinstance(g, dict) else []:
+                if isinstance(h, dict) and (cmd := h.get('command') or h.get('bash') or h.get('url') or h.get('prompt')): yield ev, str(cmd)
 
 
 def run_settings(s):
@@ -631,12 +641,10 @@ def projects():
             s = jsonf(f)
             yield from claude_settings(s, tilde(f))
             n = len(run_settings(s))
-            for ev, groups in (s.get('hooks') or {}).items():
-                for g in groups if isinstance(groups, list) else []:
-                    for h in g.get('hooks', []) if isinstance(g, dict) else []:
-                        n += 1
-                        yield item(ver(f'Project hook {ev} ({rr}): {redact(h.get("command", ""))[:160]}'))
-                        yield from scan_text(h.get('command', ''), f'Project hook {ev} ({rr})')
+            for ev, cmd in hook_cmds(s):
+                n += 1
+                yield item(ver(f'Project hook {ev} ({rr}): {redact(cmd)[:160]}'))
+                yield from scan_text(cmd, f'Project hook {ev} ({rr})')
             if n and f.endswith('/settings.json'):   # settings.local.json is yours; settings.json is shared, so it comes with a clone
                 yield warn(f'{tilde(f)} runs {n} command(s) whenever Claude Code works in {rr} (hooks, status line, helpers)',
                            "In a repo you cloned that is its authors' code: read it before trusting the folder")
@@ -647,6 +655,13 @@ def projects():
                         f'plugins {", ".join(on)}' if on else '']
                 yield warn(f'{tilde(f)} asks Claude Code to install {" and ".join(filter(None, what))} when you trust {rr}',
                            'In a repo you cloned, decline unless you know that marketplace; check a plugin first with: arche-defender vet FOLDER')
+        for f in files(*(f'{r}/{g}' for g in PROJECT_HOOKS)):   # the same, for Gemini CLI, Cursor, Windsurf and Copilot
+            hs = list(hook_cmds(jsonc(f)))
+            for ev, cmd in hs:
+                yield item(ver(f'Project hook {ev} ({rr}): {redact(cmd)[:160]}'))
+                yield from scan_text(cmd, f'Project hook {ev} ({rr})')
+            if hs: yield warn(f'{tilde(f)} runs {len(hs)} command(s) whenever an agent works in {rr} (hooks)',
+                              "In a repo you cloned that is its authors' code: read it before trusting the folder")
         for t in (jsonc(f'{r}/.vscode/tasks.json').get('tasks') or []):
             if isinstance(t, dict) and (t.get('runOptions') or {}).get('runOn') == 'folderOpen':
                 yield warn(f'{rr}/.vscode/tasks.json runs a command as soon as the folder is opened: {redact(t.get("command", ""))[:120]}',
