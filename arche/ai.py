@@ -534,6 +534,25 @@ def keys():
                    'Load keys from the environment or a keyring (secret-tool); at least chmod 600 the file')
 
 
+JUPYTER = ('~/.jupyter/jupyter_server_config.py', '~/.jupyter/jupyter_notebook_config.py', '~/.jupyter/jupyter_lab_config.py',
+           '~/.jupyter/jupyter_server_config.json', '~/.jupyter/jupyter_notebook_config.json')
+J_APP = r'(?:ServerApp|NotebookApp|IdentityProvider)'
+NO_TOKEN = re.compile(rf'''^\s*c\.{J_APP}\.token\s*=\s*u?(''|"")\s*(#.*)?$|"token"\s*:\s*""|--{J_APP}\.token=(''|""|(?=\s)|$)''', re.M)
+J_PASSWORD = re.compile(r'''^\s*c\.\w+\.(hashed_)?password\s*=\s*u?['"][^'"]|"(hashed_)?password"\s*:\s*"[^"]|--\w+\.(hashed_)?password=\S''', re.M)
+ANY_SITE = re.compile(r'''^\s*c\.\w+\.(allow_origin\s*=\s*['"]\*['"]|disable_check_xsrf\s*=\s*True)|"allow_origin"\s*:\s*"\*"|"disable_check_xsrf"\s*:\s*true|'''
+                      r'''--\w+\.(allow_origin=['"]?\*|disable_check_xsrf=True)''', re.M)
+
+
+def jupyter_rows(where, t):
+    """Jupyter settings (a config file, or a running server's command line) that let others run code on this PC."""
+    if NO_TOKEN.search(t) and not J_PASSWORD.search(t):
+        yield warn(f'Jupyter runs code for anyone who reaches it: {where} turns its token off and sets no password',
+                   'Remove the empty token (Jupyter then makes a new one at each start) or set a password: jupyter server password')
+    if ANY_SITE.search(t):
+        yield warn(f'Jupyter lets any website you open run code on this PC: {where} allows every origin or turns the XSRF check off',
+                   'Remove allow_origin = "*" and disable_check_xsrf from it')
+
+
 ANY_ORIGIN = re.compile(r'OLLAMA_ORIGINS=["\']?(?:[^"\'\s]*,)?(\*|https?://\*)(?=[,"\'\s]|$)')
 
 
@@ -550,6 +569,9 @@ def local_servers():
         if re.match(r'^(127\.|\[?::1\]?$)', addr) or addr.endswith('%lo'): yield item(f'{who} listens on this PC only')
         else: yield warn(f'{who} is reachable from your network on port {port} with no password',
                          'Bind it to 127.0.0.1 (Ollama: OLLAMA_HOST=127.0.0.1) or firewall the port')
+    for f in files(*JUPYTER): yield from jupyter_rows(tilde(f), text(f))
+    for cmd in sorted({l for l in sh('ps', '-eo', 'args', '--no-headers').splitlines() if 'jupyter' in l and '--' in l}):
+        yield from jupyter_rows(f'the running server ({cmd[:100]})', cmd)
     # ponytail: the unit's Environment= and environment.d; an EnvironmentFile= or a shell export is not read
     env = ' '.join(sh('systemctl', *u, 'show', 'ollama', '-p', 'Environment', '--value') for u in ([], ['--user']))
     if ANY_ORIGIN.search(env + ' '.join(text(f) for f in files('~/.config/environment.d/*.conf', '/etc/environment'))):

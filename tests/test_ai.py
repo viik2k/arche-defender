@@ -425,5 +425,17 @@ def test_ollama_origins():
         assert len(rows) == n, (env, rows)
 
 
+def test_jupyter():
+    from arche.ai import jupyter_rows
+    sev = lambda t: [r[1] for r in jupyter_rows('x', t)]
+    assert sev("c.ServerApp.token = ''\nc.ServerApp.ip = '0.0.0.0'\n") == [1]
+    assert sev("c.ServerApp.token = ''\nc.PasswordIdentityProvider.hashed_password = 'argon2:$x'\n") == []
+    assert sev("# c.ServerApp.token = ''\nc.ServerApp.allow_origin = '*'\n") == [1]
+    assert sev('{"IdentityProvider": {"token": ""}, "ServerApp": {"disable_check_xsrf": true}}') == [1, 1]
+    assert sev("python -m jupyter lab --ServerApp.token= --ServerApp.ip=0.0.0.0") == [1]
+    assert sev("jupyter lab --ServerApp.token=abc --ServerApp.allow_origin=*") == [1]
+    assert sev("c.ServerApp.token = 'abc'\nc.ServerApp.allow_origin = 'https://colab.research.google.com'\n") == []
+
+
 if __name__ == '__main__':
-    test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_jupyter(); test_hook_cmds(); test_ollama_origins(); test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
