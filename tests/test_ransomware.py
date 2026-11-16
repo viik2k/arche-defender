@@ -34,3 +34,17 @@ class Tripwire(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Backups(unittest.TestCase):
+    def rows(self, found):
+        return [(r[1], r[0]) for r in ransomware.backup_rows(found, now=100 * 86400)]
+
+    def test_nothing_or_only_snapshots_warns(self):
+        self.assertEqual(self.rows([]), [(1, 'No backup of your files found')])
+        self.assertEqual(self.rows([('snapshot', 'snapper home (/home)', None)])[-1], (1, 'No backup of your files found (only same-disk snapshots: snapper home)'))
+
+    def test_backup_age(self):
+        self.assertEqual(self.rows([('backup', 'Deja Dup', 95 * 86400)]), [(0, 'Backup: Deja Dup')])
+        self.assertEqual(self.rows([('backup', 'Deja Dup', 50 * 86400)]), [(1, 'Backup Deja Dup last ran 50 days ago')])
+        self.assertTrue(ransomware.epoch('2026-11-01T10:00:00Z'))
