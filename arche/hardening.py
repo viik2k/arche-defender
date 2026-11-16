@@ -6,6 +6,11 @@ from .core import HOME, PKG, UPGRADE, alert, warn, item, sh, have, text, lines, 
 INFRA_IF = re.compile(r'^(lo|docker\d*|br-|virbr|veth|tailscale|podman|cni|vnet|wg|zt)')
 
 
+def plain_swap(swaps, kind=lambda d: sh('lsblk', '-n', '-s', '-o', 'TYPE', d).split()):
+    """Swap partitions in /proc/swaps with no LUKS layer under them (zram is RAM, and a swap file shares its filesystem's encryption)."""
+    return [d for d in re.findall(r'^(/dev/\S+)\s+partition', swaps, re.M) if not d.startswith('/dev/zram') and 'crypt' not in kind(d)]
+
+
 @check('Security posture', 'Protection')
 def security():
     active = lambda u: sh('systemctl', 'is-active', u).strip() == 'active'
@@ -40,6 +45,9 @@ def security():
         elif src: yield item(f'{mnt} is encrypted (LUKS)')
     if plain: yield warn(f'Disk not encrypted ({", ".join(plain)}): anyone who takes the drive can read your files',
                          'Full-disk encryption (LUKS) is chosen at install time; back up and reinstall with encryption on')
+    elif swap := plain_swap(text('/proc/swaps')):   # LUKS on / with a plain swap partition beside it: memory lands on disk in the clear
+        yield warn(f'Swap is not encrypted ({", ".join(swap)}): passwords, keys and open files that were in memory are written there in the '
+                   'clear, and so is a hibernation image', 'Switch to zram (swapoff that partition and remove it from /etc/fstab), or put swap inside LUKS')
 
 
 @check('Firewall rules', 'Protection')
