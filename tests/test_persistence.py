@@ -1,11 +1,11 @@
 # Run: python3 tests/test_persistence.py (or pytest)
-import os, sys, tempfile
+import atexit, os, shutil, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from arche.persistence import hooks
 
 
 def test_hooks():
-    home, old = tempfile.mkdtemp(), dict(os.environ)
+    home, old = tempfile.mkdtemp(), dict(os.environ); atexit.register(shutil.rmtree, home, True)
     os.environ.update(HOME=home, GIT_CONFIG_NOSYSTEM='1')
     try:
         with open(f'{home}/.gitconfig', 'w') as f:

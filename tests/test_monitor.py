@@ -15,11 +15,12 @@ def test_fresh():
 
 
 def test_watch_run_keeps_other_notices():   # a folder-watch pass must not forget what the hourly scan already announced
-    import json, tempfile
+    import atexit, json, shutil, tempfile
     from pathlib import Path
     from arche import monitor, core
     core.load_all()
-    monitor.SEEN, monitor.have = Path(tempfile.mkdtemp()) / 'n.json', lambda c: False   # no real notifications
+    d = tempfile.mkdtemp(); atexit.register(shutil.rmtree, d, True)
+    monitor.SEEN, monitor.have = Path(d) / 'n.json', lambda c: False   # no real notifications
     monitor.SEEN.write_text(json.dumps({'told': ['Other: x', 'Dropped files: gone'], 'last': 't'}))
     monitor.run(['Dropped files'])
     s = json.loads(monitor.SEEN.read_text())

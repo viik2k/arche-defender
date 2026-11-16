@@ -37,10 +37,11 @@ def selftest():
     if [x.text for x in r if x.new] != ['fresh'] or [x.text for x in r if x.sev == ALERT] != ['bad'] or \
        [(x.text, x.fix) for x in r if x.sev == WARN] != [('meh', 'do x')]: print('FAIL baseline diff'); fail += 1
     if any(x.new for x in run_check('_t', {})): print('FAIL check missing from baseline counted as new'); fail += 1
-    real, core.IGNORE_FILE = core.IGNORE_FILE, Path(tempfile.mkdtemp()) / 'ignored.json'
-    core.set_ignored('_t', 'meh')
-    if [x.text for x in run_check('_t', None)] != ['bad', 'fresh', 'known']: print('FAIL ignore list'); fail += 1
-    core.IGNORE_FILE = real
+    with tempfile.TemporaryDirectory() as d:
+        real, core.IGNORE_FILE = core.IGNORE_FILE, Path(d) / 'ignored.json'
+        core.set_ignored('_t', 'meh')
+        if [x.text for x in run_check('_t', None)] != ['bad', 'fresh', 'known']: print('FAIL ignore list'); fail += 1
+        core.IGNORE_FILE = real
     del CHECKS['_t']
     for n, rows in scan_all(None, pick(full=True)).items():
         c = CHECKS[n]
