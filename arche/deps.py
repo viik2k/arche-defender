@@ -10,8 +10,12 @@ from .core import check, action, alert, warn, item, text, files, jsonf, write_pr
 DB = STATE / 'deps.json'
 OSV = 'https://api.osv.dev/v1'
 SKIP = {'node_modules', 'target', 'dist', 'build', 'venv', 'vendor', '__pycache__', 'site-packages'}
-FIX = {'package-lock.json': 'npm audit fix', 'pnpm-lock.yaml': 'pnpm update', 'Cargo.lock': 'cargo update',
-       'uv.lock': 'uv lock --upgrade', 'requirements.txt': 'raise the pinned versions'}
+FIX = {'package-lock.json': 'npm audit fix', 'pnpm-lock.yaml': 'pnpm update', 'yarn.lock': 'yarn upgrade, or yarn up on Yarn 2+',
+       'bun.lock': 'bun update', 'Cargo.lock': 'cargo update', 'uv.lock': 'uv lock --upgrade', 'poetry.lock': 'poetry update',
+       'Pipfile.lock': 'pipenv update', 'requirements.txt': 'raise the pinned versions', 'Gemfile.lock': 'bundle update',
+       'composer.lock': 'composer update'}
+# ponytail: go.sum is not read; it cannot tell a private module from a public one, and private names must stay here.
+NPM_NAME = r'((?:@[^/\s"@]+/)?[^@\s"/]+)'
 RANK = {'CRITICAL': 0, 'HIGH': 1, 'MODERATE': 2, 'MEDIUM': 2, 'LOW': 3}   # unrated counts as moderate
 LEVEL = ('critical', 'high', 'moderate', 'low')
 # Installed tools: what npx ran (MCP servers), global npm/pnpm packages, uv/pipx tool environments, pip --user, Claude Code itself.
@@ -66,7 +70,30 @@ def packages(path):
         sec = re.search(r'^packages:\n(.*?)(?=^\S|\Z)', t, re.M | re.S)
         for name, ver in re.findall(r"^  '?/?((?:@[^/\s']+/)?[^@\s/'(]+)@(\d[^('\s:]*)", sec[1] if sec else '', re.M):
             yield 'npm', name, ver
-    elif n in ('Cargo.lock', 'uv.lock'):
+    elif n == 'yarn.lock':   # classic: the resolved URL; Yarn 2+: npm: resolutions, unless .yarnrc.yml points at another registry
+        for name, ver in re.findall(r'^"?' + NPM_NAME + r'@[^\n]*:\n\s+version "([^"]+)"\n\s+resolved "https://registry\.(?:yarnpkg\.com|npmjs\.org)/', t, re.M):
+            yield 'npm', name, ver
+        if not re.search(r'npmRegistryServer|npmScopes', text(f'{os.path.dirname(path)}/.yarnrc.yml')):
+            for name, ver in re.findall(r'^\s+resolution: "' + NPM_NAME + r'@npm:(\d[^"]*)"', t, re.M): yield 'npm', name, ver
+    elif n == 'bun.lock':   # "name": ["name@1.2.3", "", ...]: the empty string is the default registry
+        if 'registry' not in text(f'{os.path.dirname(path)}/bunfig.toml'):
+            for name, ver in re.findall(r'\[\s*"' + NPM_NAME + r'@(\d[^"]*)",\s*""', t): yield 'npm', name, ver
+    elif n == 'Pipfile.lock':
+        try: d = json.loads(t)
+        except ValueError: return
+        pypi = {x.get('name') for x in (d.get('_meta') or {}).get('sources') or [] if str(x.get('url', '')).startswith('https://pypi.org/')}
+        for name, v in [*(d.get('default') or {}).items(), *(d.get('develop') or {}).items()]:
+            if isinstance(v, dict) and str(v.get('version', '')).startswith('==') and v.get('index', 'pypi') in pypi: yield 'PyPI', name, v['version'][2:]
+    elif n == 'Gemfile.lock':   # gems under a GEM section whose remote is rubygems.org; 4 spaces in = a gem, 6 = what it needs
+        for sec in re.findall(r'^GEM\n  remote: https://rubygems\.org/?\n  specs:\n(.*?)(?=^\S|\Z)', t, re.M | re.S):
+            for name, ver in re.findall(r'^    ([\w.-]+) \(([^)\s-]+)', sec, re.M): yield 'RubyGems', name, ver
+    elif n == 'composer.lock':
+        try: d = json.loads(t)
+        except ValueError: return
+        for p in [*(d.get('packages') or []), *(d.get('packages-dev') or [])]:
+            if str(p.get('notification-url', '')).startswith('https://packagist.org/') and p.get('version'):
+                yield 'Packagist', p['name'], str(p['version']).removeprefix('v')
+    elif n in ('Cargo.lock', 'uv.lock', 'poetry.lock'):
         try: pk = tomllib.loads(t).get('package', [])
         except tomllib.TOMLDecodeError: return
         for p in pk:
@@ -75,6 +102,7 @@ def packages(path):
                 yield 'crates.io', p['name'], p['version']
             elif n == 'uv.lock' and isinstance(src, dict) and src.get('registry') == 'https://pypi.org/simple':
                 yield 'PyPI', p['name'], p['version']
+            elif n == 'poetry.lock' and not src: yield 'PyPI', p['name'], p['version']   # other indexes add a [package.source]
     elif not re.search(r'^\s*(-i|--index-url|--extra-index-url)\b', t, re.M):   # requirements.txt: pinned lines only
         for name, ver in re.findall(r'^\s*([A-Za-z0-9][\w.-]*)(?:\[[^\]]*\])?\s*==\s*([\w.]+)\s*(?:[;#]|$)', t, re.M):
             yield 'PyPI', name, ver
@@ -111,7 +139,7 @@ def update():
     tools = set(files(*TOOLS))
     locks = {p: sorted(set(packages(p))) for p in [*lockfiles(HOME), *tools]}
     locks = {p: v for p, v in locks.items() if v}
-    if not locks: return 'No npm, pnpm, Cargo, uv or requirements.txt lockfiles or installed tools found.'
+    if not locks: return f'No lockfiles ({", ".join(FIX)}) or installed tools found.'
     try:
         hits = query({x for v in locks.values() for x in v})
         old = {k: v for k, v in jsonf(DB).get('details', {}).items() if not (v or {}).get('err')}   # advisories rarely change

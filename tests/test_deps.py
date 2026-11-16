@@ -74,6 +74,34 @@ class Packages(unittest.TestCase):
                          [('PyPI', 'Django', '4.2.1'), ('PyPI', 'requests', '2.31.0')])
         self.assertEqual(self.parse('requirements.txt', '--index-url https://pypi.corp.example/simple\nsecret==1.0\n'), [])
 
+    def test_more_lockfiles(self):
+        yarn1 = ('# yarn lockfile v1\n\n"@babel/core@^7.0.0", "@babel/core@^7.1.0":\n  version "7.24.0"\n  resolved "https://registry.yarnpkg.com/@babel/core/-/core-7.24.0.tgz#a"\n\n'
+                 'lodash@^4:\n  version "4.17.20"\n  resolved "https://registry.npmjs.org/lodash/-/lodash-4.17.20.tgz#b"\n\n'
+                 'secret@^1:\n  version "1.0.0"\n  resolved "https://npm.corp.example/secret-1.0.0.tgz"\n')
+        self.assertEqual(self.parse('yarn.lock', yarn1), [('npm', '@babel/core', '7.24.0'), ('npm', 'lodash', '4.17.20')])
+        berry = ('__metadata:\n  version: 8\n\n"lodash@npm:^4":\n  version: 4.17.20\n  resolution: "lodash@npm:4.17.20"\n\n'
+                 '"resolve@patch:resolve@npm%3A^1#~builtin<compat/resolve>":\n  version: 1.22.1\n  resolution: "resolve@patch:resolve@npm%3A1.22.1#x"\n\n'
+                 '"mine@workspace:.":\n  version: 0.0.0-use.local\n  resolution: "mine@workspace:."\n')
+        self.assertEqual(self.parse('yarn.lock', berry), [('npm', 'lodash', '4.17.20')])
+        Path(self.d, '.yarnrc.yml').write_text('npmRegistryServer: "https://npm.corp.example"\n')
+        self.assertEqual(self.parse('yarn.lock', berry), [])
+        bun = '{\n  "lockfileVersion": 1,\n  "packages": {\n    "lodash": ["lodash@4.17.20", "", {}, "sha512-x"],\n' \
+              '    "@s/b": ["@s/b@2.0.0", "", { "dependencies": {} }, "sha512-y"],\n    "corp": ["corp@1.0.0", "https://npm.corp.example/corp.tgz", {}],\n' \
+              '    "mine": ["mine@workspace:packages/mine"],\n  }\n}\n'
+        self.assertEqual(self.parse('bun.lock', bun), [('npm', '@s/b', '2.0.0'), ('npm', 'lodash', '4.17.20')])
+        poetry = UV.replace('source = { registry = "https://pypi.org/simple" }\n', '').replace('source = { editable = "." }', '[package.source]\ntype = "legacy"\nurl = "https://pypi.corp.example/simple"')
+        self.assertEqual(self.parse('poetry.lock', poetry), [('PyPI', 'pillow', '12.3.0')])
+        pipfile = {'_meta': {'sources': [{'name': 'pypi', 'url': 'https://pypi.org/simple'}, {'name': 'corp', 'url': 'https://pypi.corp.example/simple'}]},
+                   'default': {'requests': {'version': '==2.31.0', 'index': 'pypi'}, 'secret': {'version': '==1.0', 'index': 'corp'}, 'mine': {'path': '.'}},
+                   'develop': {'pytest': {'version': '==8.0.0'}}}
+        self.assertEqual(self.parse('Pipfile.lock', json.dumps(pipfile)), [('PyPI', 'pytest', '8.0.0'), ('PyPI', 'requests', '2.31.0')])
+        gem = ('GIT\n  remote: https://git.corp.example/secret.git\n  specs:\n    secret (1.0.0)\n\nGEM\n  remote: https://rubygems.org/\n  specs:\n'
+               '    nokogiri (1.15.4-x86_64-linux)\n      racc (~> 1.4)\n    rack (3.0.8)\n\nPLATFORMS\n  x86_64-linux\n')
+        self.assertEqual(self.parse('Gemfile.lock', gem), [('RubyGems', 'nokogiri', '1.15.4'), ('RubyGems', 'rack', '3.0.8')])
+        composer = {'packages': [{'name': 'symfony/http-kernel', 'version': 'v5.4.1', 'notification-url': 'https://packagist.org/downloads/'},
+                                 {'name': 'corp/secret', 'version': '1.0.0'}], 'packages-dev': [{'name': 'phpunit/phpunit', 'version': '10.0.0', 'notification-url': 'https://packagist.org/downloads/'}]}
+        self.assertEqual(self.parse('composer.lock', json.dumps(composer)), [('Packagist', 'phpunit/phpunit', '10.0.0'), ('Packagist', 'symfony/http-kernel', '5.4.1')])
+
     def test_lockfiles_skip_dependency_trees(self):
         for p in ('proj/package-lock.json', 'proj/node_modules/x/package-lock.json', '.hidden/Cargo.lock', 'proj/target/Cargo.lock'):
             Path(self.d, p).parent.mkdir(parents=True, exist_ok=True); Path(self.d, p).write_text('{}')
