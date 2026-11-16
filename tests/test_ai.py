@@ -384,6 +384,20 @@ def test_addons():
     assert sum(s == 1 and ('security_level' in t or 'install extensions' in t) for t, s, _ in rows) == 2, rows
     assert not any('gradio.live' in t for t, _, _ in rows), rows
 
+def test_goose():
+    from arche import ai
+    d = tmp(); os.makedirs(f'{d}/.config/goose')
+    open(f'{d}/.config/goose/config.yaml', 'w').write(
+        "GOOSE_MODE: auto\nextensions:\n  developer:\n    bundled: true\n    enabled: true\n    type: builtin\n"
+        "  github:\n    args:\n    - -y\n    - '@modelcontextprotocol/server-github'\n    cmd: npx\n    enabled: true\n"
+        "    envs:\n      GITHUB_PERSONAL_ACCESS_TOKEN: ghp_secret\n    type: stdio\n  old:\n    cmd: /tmp/x/run\n    enabled: false\n"
+        "  remote:\n    type: streamable_http\n    uri: http://203.0.113.5/mcp\nGOOSE_MODEL: x\n")
+    home, ai.HOME = ai.HOME, d
+    try: servers = [(n, s) for w, n, s in ai.mcp_servers() if w == ai.GOOSE]; perm = [t for t, _, _ in ai.permissions() if 'Goose' in t]
+    finally: ai.HOME = home
+    assert [n for n, _ in servers] == ['github', 'remote'] and ai.unpinned(servers[0][1]) and 'ghp_secret' not in str(servers), servers
+    assert perm == ['Goose runs every tool without asking (GOOSE_MODE: auto)'], perm
+
 
 if __name__ == '__main__':
-    test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')
+    test_goose(); test_addons(); test_vet(); test_agent_commands(); test_uvx_packages(); test_preapproved(); test_fingerprint(); test_openclaw(); test_copilot_plugins(); test_project_mcp(); test_rc_approvals_off(); test_chat_secrets(); test_hub_code(); test_chat_readers(); test_desktop_extension(); test_invisible_code(); test_claude_settings(); test_packages(); test_model_risks(); test_pickles(); test_text_rules(); test_mcp(); test_running(); print('ok')

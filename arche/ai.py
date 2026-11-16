@@ -275,6 +275,9 @@ def permissions():
     for u in re.findall(r'^\s*base_url\s*=\s*["\']([^"\']+)', codex, re.M):   # [model_providers.x]
         if not AI_HOSTS.match(u): yield warn(f'Codex sends its prompts, files and API key to {redact(u)[:80]} (base_url in ~/.codex/config.toml)',
                                              'Remove that model provider unless you run that server yourself')
+    # ponytail: only an explicit GOOSE_MODE: an unset one is auto in recent Goose too, but varies by version
+    if re.search(r'^GOOSE_MODE:\s*["\']?auto\b', text(f'{HOME}/.config/goose/config.yaml'), re.M):
+        yield warn('Goose runs every tool without asking (GOOSE_MODE: auto)', 'Use smart_approve or approve: goose configure > Goose Settings > Mode')
     if re.search(r'"(yolo|autoAccept)"\s*:\s*true', text(f'{HOME}/.gemini/settings.json')):
         yield warn('Gemini CLI auto-accepts tool calls', 'Turn off autoAccept/yolo in ~/.gemini/settings.json')
     for f in files(*OPENCLAW):   # JSON5, so plain regexes rather than a parser
@@ -386,6 +389,26 @@ def running():
                    'Fine for a throwaway container or VM; on your own account, restart it without that flag')
 
 
+GOOSE = '~/.config/goose/config.yaml'
+
+
+def goose_extensions(t):
+    """{name: server} from the extensions block of Goose's config.yaml, the plain YAML Goose writes itself (no YAML library here)."""
+    out, cur, key = {}, None, None
+    block = re.search(r'^extensions:[ \t]*\n((?:[ \t-].*\n?|\n)*)', t, re.M)
+    for l in (block[1] if block else '').splitlines():
+        if m := re.match(r'^  ([^\s:][^:]*):\s*$', l): cur, key = out.setdefault(m[1].strip('\'"'), {'args': [], 'env': {}}), None
+        elif cur is None: continue
+        elif m := re.match(r'^    (\w+):\s*(.*)$', l):
+            key, v = m[1], m[2].strip().strip('\'"')
+            if key in ('cmd', 'uri'): cur['command' if key == 'cmd' else 'url'] = v
+            elif key == 'enabled' and v == 'false': cur['off'] = True
+            elif key == 'args' and v.startswith('['): cur['args'] = [x.strip().strip('\'"') for x in v[1:-1].split(',') if x.strip()]
+        elif key == 'args' and (m := re.match(r'^\s*- (.*)$', l)): cur['args'].append(m[1].strip().strip('\'"'))
+        elif key == 'envs' and (m := re.match(r'^      (\w+):', l)): cur['env'][m[1]] = '...'   # names only: values are tokens
+    return {n: s for n, s in out.items() if not s.pop('off', False) and ('command' in s or 'url' in s)}   # builtins have neither
+
+
 def mcp_servers():
     """(where, name, server) for every MCP server configured in an agent, a plugin, a Desktop extension or Codex."""
     srcs = [(tilde(f), jsonc(f)) for f in files(*MCP_FILES)]
@@ -404,6 +427,7 @@ def mcp_servers():
         args = re.findall(r'"([^"]*)"', (re.search(r'^args\s*=\s*\[(.*?)\]', body, re.M | re.S) or [''])[0] or '')
         url = re.search(r'^url\s*=\s*"([^"]*)"', body, re.M)
         yield '~/.codex/config.toml', name, {'command': cmd[1] if cmd else '', 'args': args, 'url': url[1] if url else ''}
+    for name, s in goose_extensions(text(f'{HOME}/.config/goose/config.yaml')).items(): yield GOOSE, name, s
 
 
 @check('MCP servers', FAM)
