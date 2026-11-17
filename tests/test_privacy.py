@@ -239,7 +239,7 @@ class CodeSecrets(unittest.TestCase):
         Path(d, 'tests').mkdir(); Path(d, 'tests/fixture.py').write_text(f'TOKEN = "{tok}"\n')
         Path(d, 'deploy.sh').write_text(f'export GH_TOKEN={tok}\n')
         Path(d, 'keygen.py').write_text("PEM = re.compile(r'-----BEGIN (RSA )?PRIVATE KEY-----')\n")
-        Path(d, 'firebase.js').write_text("const cfg = {apiKey: 'AIzaSyB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3k', authDomain: 'x.firebaseapp.com'}\n")
+        Path(d, 'firebase.js').write_text("const cfg = {apiKey: 'AIza" + "SyB3dE5gH7jK9mN1pQ3sT5vX7zA9cE1gI3k', authDomain: 'x.firebaseapp.com'}\n")   # split so secret scanners skip the fake key
         git('add', '.'); git('commit', '-q', '-m', 'x')
         Path(d, 'later.sh').write_text(f'export GH_TOKEN={tok}\n')   # not committed
         self.assertEqual(privacy.repo_secrets(d), {'deploy.sh': ['GitHub token']})
